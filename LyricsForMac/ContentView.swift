@@ -375,7 +375,7 @@ struct LyricsWidgetView: View {
                 }
             }
         }
-        .frame(width: 600, height: 500)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(settings.backgroundColor)
         .clipShape(RoundedRectangle(cornerRadius: settings.cornerRadius))
         .overlay(
@@ -477,6 +477,7 @@ struct LyricsWidgetView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
         .background(
             settings.headerColor.opacity(0.95)
                 .blur(radius: 10)
@@ -586,28 +587,29 @@ struct LyricsWidgetView: View {
     // MARK: - Settings Panel
     
     private var settingsPanel: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Header
-            HStack {
-                Text("Settings")
-                    .font(.system(size: 18, weight: .bold, design: .monospaced))
-                    .foregroundColor(.black)
-                
-                Spacer()
-                
-                Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        showSettings = false
+        GeometryReader { geometry in
+            VStack(alignment: .leading, spacing: 20) {
+                // Header
+                HStack {
+                    Text("Settings")
+                        .font(.system(size: 18, weight: .bold, design: .monospaced))
+                        .foregroundColor(.black)
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showSettings = false
+                        }
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14))
+                            .foregroundColor(.black.opacity(0.6))
+                            .frame(width: 28, height: 28)
                     }
-                }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14))
-                        .foregroundColor(.black.opacity(0.6))
-                        .frame(width: 28, height: 28)
+                    .buttonStyle(PlainButtonStyle())
+                    .onHover { _ in NSCursor.arrow.set() }
                 }
-                .buttonStyle(PlainButtonStyle())
-                .onHover { _ in NSCursor.arrow.set() }
-            }
             
             Divider()
                 .background(Color.black.opacity(0.1))
@@ -735,18 +737,19 @@ struct LyricsWidgetView: View {
             }
             .buttonStyle(PlainButtonStyle())
             .onHover { _ in NSCursor.arrow.set() }
+            }
+            .padding(20)
+            .frame(width: min(280, geometry.size.width * 0.45))
+            .frame(maxHeight: .infinity)
+            .background(settings.headerColor)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.black.opacity(0.1), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.2), radius: 15, x: -5, y: 0)
+            .padding(.trailing, 8)
         }
-        .padding(20)
-        .frame(width: 280)
-        .frame(maxHeight: .infinity)
-        .background(settings.headerColor)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.black.opacity(0.1), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.2), radius: 15, x: -5, y: 0)
-        .padding(.trailing, 8)
     }
     
     // MARK: - Playback Controls (Commented Out)
@@ -1001,18 +1004,28 @@ struct LyricLineView: View {
     let isPast: Bool
     
     var body: some View {
-        Text(line.text)
-            .font(.system(
-                size: isCurrent ? 32 : 20,
-                weight: isCurrent ? .bold : .regular,
-                design: .monospaced
-            ))
-            .foregroundColor(isCurrent ? .black : .black.opacity(isPast ? 0.3 : 0.25))
-            .multilineTextAlignment(.center)
-            .padding(.vertical, isCurrent ? 16 : 12)
-            .scaleEffect(isCurrent ? 1.0 : 0.95)
-            .blur(radius: isCurrent ? 0 : 2.5)
-            .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isCurrent)
+        GeometryReader { geometry in
+            Text(line.text)
+                .font(.system(
+                    size: scaledFontSize(baseSize: isCurrent ? 32 : 20, windowWidth: geometry.size.width),
+                    weight: isCurrent ? .bold : .regular,
+                    design: .monospaced
+                ))
+                .foregroundColor(isCurrent ? .black : .black.opacity(isPast ? 0.3 : 0.25))
+                .multilineTextAlignment(.center)
+                .padding(.vertical, isCurrent ? 16 : 12)
+                .scaleEffect(isCurrent ? 1.0 : 0.95)
+                .blur(radius: isCurrent ? 0 : 2.5)
+                .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isCurrent)
+                .frame(maxWidth: .infinity)
+        }
+        .frame(height: isCurrent ? 70 : 50)
+    }
+    
+    private func scaledFontSize(baseSize: CGFloat, windowWidth: CGFloat) -> CGFloat {
+        // Scale font based on window width (600 is the ideal width)
+        let scaleFactor = min(max(windowWidth / 600, 0.7), 1.3)
+        return baseSize * scaleFactor
     }
 }
 

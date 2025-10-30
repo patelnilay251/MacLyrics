@@ -14,7 +14,7 @@ struct LyricsForMacApp: App {
     var body: some Scene {
         WindowGroup {
             LyricsWidgetView(song: sampleSong)
-                .frame(width: 600, height: 500)
+                .frame(minWidth: 400, idealWidth: 600, maxWidth: 1000, minHeight: 400, idealHeight: 500, maxHeight: 800)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
