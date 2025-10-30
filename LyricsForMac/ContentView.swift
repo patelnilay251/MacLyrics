@@ -1004,28 +1004,22 @@ struct LyricLineView: View {
     let isPast: Bool
     
     var body: some View {
-        GeometryReader { geometry in
-            Text(line.text)
-                .font(.system(
-                    size: scaledFontSize(baseSize: isCurrent ? 32 : 20, windowWidth: geometry.size.width),
-                    weight: isCurrent ? .bold : .regular,
-                    design: .monospaced
-                ))
-                .foregroundColor(isCurrent ? .black : .black.opacity(isPast ? 0.3 : 0.25))
-                .multilineTextAlignment(.center)
-                .padding(.vertical, isCurrent ? 16 : 12)
-                .scaleEffect(isCurrent ? 1.0 : 0.95)
-                .blur(radius: isCurrent ? 0 : 2.5)
-                .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isCurrent)
-                .frame(maxWidth: .infinity)
-        }
-        .frame(height: isCurrent ? 70 : 50)
-    }
-    
-    private func scaledFontSize(baseSize: CGFloat, windowWidth: CGFloat) -> CGFloat {
-        // Scale font based on window width (600 is the ideal width)
-        let scaleFactor = min(max(windowWidth / 600, 0.7), 1.3)
-        return baseSize * scaleFactor
+        Text(line.text)
+            .font(.system(
+                size: isCurrent ? 32 : 20,
+                weight: isCurrent ? .bold : .regular,
+                design: .monospaced
+            ))
+            .foregroundColor(isCurrent ? .black : .black.opacity(isPast ? 0.3 : 0.25))
+            .multilineTextAlignment(.center)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, isCurrent ? 16 : 12)
+            .padding(.horizontal, 20)
+            .scaleEffect(isCurrent ? 1.0 : 0.95)
+            .blur(radius: isCurrent ? 0 : 2.5)
+            .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isCurrent)
+            .frame(maxWidth: .infinity)
     }
 }
 
