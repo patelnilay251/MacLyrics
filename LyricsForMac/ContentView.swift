@@ -361,7 +361,12 @@ struct LyricsWidgetView: View {
             VStack {
                 if isHovering {
                     headerView
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .transition(
+                            .asymmetric(
+                                insertion: .move(edge: .top).combined(with: .opacity).combined(with: .scale(scale: 0.95)),
+                                removal: .move(edge: .top).combined(with: .opacity).combined(with: .scale(scale: 0.95))
+                            )
+                        )
                 }
                 Spacer()
             }
@@ -371,7 +376,12 @@ struct LyricsWidgetView: View {
                 HStack {
                     Spacer()
                     settingsPanel
-                        .transition(.move(edge: .trailing))
+                        .transition(
+                            .asymmetric(
+                                insertion: .move(edge: .trailing).combined(with: .opacity),
+                                removal: .move(edge: .trailing).combined(with: .opacity)
+                            )
+                        )
                 }
             }
         }
@@ -385,7 +395,7 @@ struct LyricsWidgetView: View {
         .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 10)
         .opacity(settings.windowOpacity)
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 isHovering = hovering
             }
         }
@@ -436,7 +446,7 @@ struct LyricsWidgetView: View {
             HStack(spacing: 8) {
                 // Settings Button
                 Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                         showSettings.toggle()
                     }
                 }) {
@@ -450,7 +460,7 @@ struct LyricsWidgetView: View {
                 
                 // Minimize/Fullscreen Button
                 Button(action: {
-                    withAnimation(.easeInOut(duration: 0.25)) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                         isMinimized.toggle()
                     }
                 }) {
@@ -525,7 +535,7 @@ struct LyricsWidgetView: View {
             } else {
                 // Normal lyrics display
                 Spacer()
-                ForEach(getVisibleLines()) { item in
+                ForEach(Array(getVisibleLines().enumerated()), id: \.element.id) { offset, item in
                     LyricLineView(
                         line: item.line,
                         isCurrent: item.index == currentLineIndex,
@@ -536,6 +546,11 @@ struct LyricsWidgetView: View {
                             insertion: lineInsertionTransition,
                             removal: lineRemovalTransition
                         )
+                    )
+                    .animation(
+                        .spring(response: 0.6, dampingFraction: 0.82)
+                            .delay(Double(offset) * 0.05),
+                        value: item.index == currentLineIndex
                     )
                 }
                 Spacer()
@@ -562,7 +577,7 @@ struct LyricsWidgetView: View {
                     Rectangle()
                         .fill(Color.black.opacity(0.8))
                         .frame(width: geometry.size.width * CGFloat(songDuration > 0 ? currentTime / songDuration : 0), height: 3)
-                        .animation(.linear(duration: 0.1), value: currentTime)
+                        .animation(.easeOut(duration: 0.2), value: currentTime)
                 }
             }
             .frame(height: 3)
@@ -598,7 +613,7 @@ struct LyricsWidgetView: View {
                     Spacer()
                     
                     Button(action: {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                             showSettings = false
                         }
                     }) {
@@ -716,7 +731,7 @@ struct LyricsWidgetView: View {
             
             // Reset Button
             Button(action: {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
                     settings.windowOpacity = 1.0
                     settings.cornerRadius = 16.0
                     settings.backgroundColor = Color(red: 245/255, green: 241/255, blue: 232/255)
@@ -801,20 +816,28 @@ struct LyricsWidgetView: View {
     // MARK: - Helper Functions
     
     private var lineInsertionTransition: AnyTransition {
-        .opacity
-            .combined(with: .offset(y: 20))
-            .combined(with: blurTransition)
+        .asymmetric(
+            insertion: .opacity
+                .combined(with: .offset(y: 30))
+                .combined(with: .scale(scale: 0.92))
+                .combined(with: blurTransition),
+            removal: .identity
+        )
     }
     
     private var lineRemovalTransition: AnyTransition {
-        .opacity
-            .combined(with: .offset(y: -20))
-            .combined(with: blurTransition)
+        .asymmetric(
+            insertion: .identity,
+            removal: .opacity
+                .combined(with: .offset(y: -30))
+                .combined(with: .scale(scale: 0.92))
+                .combined(with: blurTransition)
+        )
     }
     
     private var blurTransition: AnyTransition {
         .modifier(
-            active: BlurTransitionModifier(radius: 4),
+            active: BlurTransitionModifier(radius: 8),
             identity: BlurTransitionModifier(radius: 0)
         )
     }
@@ -858,7 +881,7 @@ struct LyricsWidgetView: View {
             let nextTime = nextIndex.map { song.lyrics[$0].time } ?? Double.infinity
             return currentTime >= line.time && currentTime < nextTime
         }) {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) {
                 currentLineIndex = newIndex
             }
         }
@@ -1016,9 +1039,23 @@ struct LyricLineView: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.vertical, isCurrent ? 16 : 12)
             .padding(.horizontal, 20)
-            .scaleEffect(isCurrent ? 1.0 : 0.95)
-            .blur(radius: isCurrent ? 0 : 2.5)
-            .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isCurrent)
+            .scaleEffect(isCurrent ? 1.05 : 0.92)
+            .blur(radius: isCurrent ? 0 : 3.5)
+            .shadow(
+                color: isCurrent ? .black.opacity(0.08) : .clear,
+                radius: isCurrent ? 12 : 0,
+                x: 0,
+                y: isCurrent ? 4 : 0
+            )
+            .animation(
+                .spring(response: 0.55, dampingFraction: 0.78)
+                    .speed(0.9),
+                value: isCurrent
+            )
+            .animation(
+                .easeInOut(duration: 0.4),
+                value: isPast
+            )
             .frame(maxWidth: .infinity)
     }
 }
