@@ -1073,22 +1073,114 @@ struct ScaleButtonStyle: ButtonStyle {
 // MARK: - App Delegate
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: NSStatusItem?
+    private var lyricsWindow: NSWindow?
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Make window floating and movable - transparent so only inner content is visible
-        if let window = NSApplication.shared.windows.first {
-            window.level = .floating
-            window.isMovableByWindowBackground = true
-            window.backgroundColor = .clear
-            window.isOpaque = false
-            window.hasShadow = false
-            window.titlebarAppearsTransparent = true
-            window.standardWindowButton(.closeButton)?.isHidden = true
-            window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-            window.standardWindowButton(.zoomButton)?.isHidden = true
-        }
+        NSApp.setActivationPolicy(.accessory)
+        
+        configureStatusItem()
+        configureInitialWindow()
     }
     
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return true
+        return false
+    }
+    
+    // MARK: - Status Item
+    
+    private func configureStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        
+        guard let button = statusItem?.button else { return }
+        
+        button.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: "Lyrics")
+        button.target = self
+        button.action = #selector(handleStatusItemClick(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+    }
+    
+    private var statusMenu: NSMenu {
+        let menu = NSMenu()
+        
+        let showItem = NSMenuItem(title: "Show Lyrics", action: #selector(showWindow), keyEquivalent: "")
+        showItem.target = self
+        menu.addItem(showItem)
+        
+        menu.addItem(NSMenuItem.separator())
+        
+        let quitItem = NSMenuItem(title: "Quit Lyrics", action: #selector(quitApp), keyEquivalent: "")
+        quitItem.target = self
+        menu.addItem(quitItem)
+        
+        return menu
+    }
+    
+    @objc private func handleStatusItemClick(_ sender: Any?) {
+        guard let event = NSApp.currentEvent else {
+            toggleWindowVisibility()
+            return
+        }
+        
+        let isRightClick = event.type == .rightMouseUp
+        let isControlClick = event.modifierFlags.contains(.control) && event.type == .leftMouseUp
+        
+        if (isRightClick || isControlClick), let button = statusItem?.button {
+            statusMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 2), in: button)
+            return
+        }
+        
+        toggleWindowVisibility()
+    }
+    
+    // MARK: - Window Management
+    
+    private func configureInitialWindow() {
+        guard let window = NSApplication.shared.windows.first else { return }
+        
+        applyWindowStyling(window)
+        lyricsWindow = window
+        window.makeKeyAndOrderFront(nil)
+    }
+    
+    private func applyWindowStyling(_ window: NSWindow) {
+        window.level = .floating
+        window.isMovableByWindowBackground = true
+        window.backgroundColor = .clear
+        window.isOpaque = false
+        window.hasShadow = false
+        window.titlebarAppearsTransparent = true
+        window.standardWindowButton(.closeButton)?.isHidden = true
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
+    }
+    
+    private func toggleWindowVisibility() {
+        if lyricsWindow == nil {
+            configureInitialWindow()
+        }
+        
+        guard let window = lyricsWindow else { return }
+        
+        if window.isVisible {
+            window.orderOut(nil)
+        } else {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+    
+    @objc private func showWindow() {
+        if lyricsWindow == nil {
+            configureInitialWindow()
+        }
+        
+        guard let window = lyricsWindow else { return }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    
+    @objc private func quitApp() {
+        NSApplication.shared.terminate(nil)
     }
 }
