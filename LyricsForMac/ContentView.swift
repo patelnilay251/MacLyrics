@@ -323,21 +323,271 @@ let sampleSong = Song(
     ]
 )
 
+// MARK: - Theme Definitions
+
+enum ThemeMode: String, CaseIterable, Identifiable {
+    case matchSystem
+    case manual
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .matchSystem: return "Match System"
+        case .manual: return "Manual"
+        }
+    }
+}
+
+struct ThemePalette {
+    let background: Color
+    let header: Color
+    let primaryText: Color
+    let secondaryText: Color
+    let accent: Color
+    let border: Color
+    
+    func mutedText(_ opacity: Double) -> Color {
+        primaryText.opacity(opacity)
+    }
+    
+    var iconColor: Color {
+        primaryText.opacity(0.7)
+    }
+    
+    var controlSurface: Color {
+        header.opacity(0.8)
+    }
+    
+    var progressTrack: Color {
+        primaryText.opacity(0.12)
+    }
+    
+    var progressFill: Color {
+        accent
+    }
+}
+
+enum ThemePreset: String, CaseIterable, Identifiable {
+    case desert
+    case glacier
+    case coral
+    case midnight
+    case forest
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .desert: return "Desert Sand"
+        case .glacier: return "Glacier"
+        case .coral: return "Coral Bloom"
+        case .midnight: return "Midnight"
+        case .forest: return "Forest Night"
+        }
+    }
+    
+    var palette: ThemePalette {
+        switch self {
+        case .desert:
+            return ThemePalette(
+                background: Color(red: 245/255, green: 241/255, blue: 232/255),
+                header: Color(red: 238/255, green: 234/255, blue: 222/255),
+                primaryText: .black,
+                secondaryText: Color.black.opacity(0.65),
+                accent: Color(red: 96/255, green: 78/255, blue: 60/255),
+                border: Color.black.opacity(0.16)
+            )
+        case .glacier:
+            return ThemePalette(
+                background: Color(red: 236/255, green: 244/255, blue: 252/255),
+                header: Color(red: 224/255, green: 236/255, blue: 248/255),
+                primaryText: .black,
+                secondaryText: Color.black.opacity(0.62),
+                accent: Color(red: 50/255, green: 96/255, blue: 182/255),
+                border: Color.black.opacity(0.12)
+            )
+        case .coral:
+            return ThemePalette(
+                background: Color(red: 255/255, green: 240/255, blue: 239/255),
+                header: Color(red: 255/255, green: 226/255, blue: 224/255),
+                primaryText: .black,
+                secondaryText: Color.black.opacity(0.6),
+                accent: Color(red: 204/255, green: 78/255, blue: 92/255),
+                border: Color.black.opacity(0.14)
+            )
+        case .midnight:
+            return ThemePalette(
+                background: Color(red: 24/255, green: 25/255, blue: 30/255),
+                header: Color(red: 36/255, green: 37/255, blue: 45/255),
+                primaryText: .white,
+                secondaryText: Color.white.opacity(0.75),
+                accent: Color(red: 138/255, green: 180/255, blue: 255/255),
+                border: Color.white.opacity(0.18)
+            )
+        case .forest:
+            return ThemePalette(
+                background: Color(red: 26/255, green: 37/255, blue: 32/255),
+                header: Color(red: 34/255, green: 48/255, blue: 42/255),
+                primaryText: .white,
+                secondaryText: Color.white.opacity(0.78),
+                accent: Color(red: 120/255, green: 200/255, blue: 160/255),
+                border: Color.white.opacity(0.16)
+            )
+        }
+    }
+}
+
+struct ResponsiveMetrics {
+    let size: CGSize
+    let fontScale: Double
+    let isMinimized: Bool
+    
+    var width: CGFloat { size.width }
+    var height: CGFloat { size.height }
+    
+    var isCompactWidth: Bool { width < 520 }
+    var isWideWidth: Bool { width > 960 }
+    var isShortHeight: Bool { height < 560 }
+    
+    var headerReservedHeight: CGFloat {
+        if isMinimized { return 48 }
+        return isCompactWidth ? 56 : 64
+    }
+    
+    var headerHorizontalPadding: CGFloat {
+        isCompactWidth ? 16 : 20
+    }
+    
+    var headerVerticalPadding: CGFloat {
+        isCompactWidth ? 12 : 16
+    }
+    
+    var headerIconSize: CGFloat {
+        isCompactWidth ? 16 : 20
+    }
+    
+    var headerButtonSize: CGFloat {
+        isCompactWidth ? 14 : 16
+    }
+    
+    var headerTitleSize: CGFloat {
+        isCompactWidth ? 13 : 15
+    }
+    
+    var headerSubtitleSize: CGFloat {
+        isCompactWidth ? 11 : 12
+    }
+    
+    var contentHorizontalPadding: CGFloat {
+        if isMinimized { return 18 }
+        if isCompactWidth { return 24 }
+        if isWideWidth { return 56 }
+        return 40
+    }
+    
+    var lyricsVerticalSpacing: CGFloat {
+        isCompactWidth ? 8 : 12
+    }
+    
+    var lyricsVerticalGutter: CGFloat {
+        isShortHeight ? 12 : 20
+    }
+    
+    var lyricCurrentSize: CGFloat {
+        let base: CGFloat
+        if isMinimized { base = 26 }
+        else if isCompactWidth { base = 28 }
+        else if isWideWidth { base = 36 }
+        else { base = 32 }
+        return base * fontScale
+    }
+    
+    var lyricSecondarySize: CGFloat {
+        let base: CGFloat
+        if isMinimized { base = 16 }
+        else if isCompactWidth { base = 18 }
+        else { base = 20 }
+        return base * fontScale
+    }
+    
+    var lyricVerticalPadding: CGFloat {
+        isMinimized ? 10 : (isCompactWidth ? 12 : 16)
+    }
+    
+    var lyricHorizontalPadding: CGFloat {
+        isCompactWidth ? 16 : 24
+    }
+    
+    var lyricCurrentScale: CGFloat {
+        isMinimized ? 1.03 : 1.05
+    }
+    
+    var lyricSecondaryScale: CGFloat {
+        isMinimized ? 0.96 : 0.92
+    }
+    
+    var lyricBlurRadius: CGFloat {
+        isCompactWidth ? 2.5 : 3.5
+    }
+    
+    var progressHeight: CGFloat {
+        isCompactWidth ? 3 : 4
+    }
+    
+    var progressBottomPadding: CGFloat {
+        isShortHeight ? 12 : 18
+    }
+    
+    var settingsWidth: CGFloat {
+        if width < 720 { return min(width * 0.9, 360) }
+        if width < 1024 { return 360 }
+        return 380
+    }
+    
+    var settingsShouldScroll: Bool {
+        height < 600
+    }
+    
+    var settingsSectionSpacing: CGFloat {
+        isCompactWidth ? 16 : 20
+    }
+    
+    var settingsControlSpacing: CGFloat {
+        isCompactWidth ? 12 : 16
+    }
+    
+    var settingsEdgePadding: CGFloat {
+        isCompactWidth ? 16 : 20
+    }
+    
+}
+
 // MARK: - Settings Model
 
 class AppSettings: ObservableObject {
     @Published var windowOpacity: Double = 1.0
     @Published var cornerRadius: Double = 16.0
-    @Published var backgroundColor: Color = Color(red: 245/255, green: 241/255, blue: 232/255)
-    @Published var headerColor: Color = Color(red: 238/255, green: 234/255, blue: 222/255)
-}
-
-// MARK: - Color Extensions
-
-extension Color {
-    static let widgetBackground = Color(red: 245/255, green: 241/255, blue: 232/255)
-    static let widgetHeader = Color(red: 238/255, green: 234/255, blue: 222/255)
-    static let widgetBorder = Color.black
+    @Published var themeMode: ThemeMode = .matchSystem
+    @Published var manualTheme: ThemePreset = .desert
+    @Published var fontScale: Double = 1.0
+    
+    func palette(for colorScheme: ColorScheme) -> ThemePalette {
+        switch themeMode {
+        case .matchSystem:
+            return colorScheme == .dark ? ThemePreset.midnight.palette : ThemePreset.desert.palette
+        case .manual:
+            return manualTheme.palette
+        }
+    }
+    
+    func reset() {
+        windowOpacity = 1.0
+        cornerRadius = 16.0
+        themeMode = .matchSystem
+        manualTheme = .desert
+        fontScale = 1.0
+    }
 }
 
 // MARK: - Main Content View
@@ -357,209 +607,225 @@ struct LyricsWidgetView: View {
     @State private var isHovering = false
     @State private var showSettings = false
     @StateObject private var settings = AppSettings()
+    @Environment(\.colorScheme) private var colorScheme
     
     init(song: Song) {
         _song = State(initialValue: song)
     }
     
+    private var theme: ThemePalette {
+        settings.palette(for: colorScheme)
+    }
+    
+    private var borderColor: Color {
+        theme.border
+    }
+    
+    private var shadowColor: Color {
+        colorScheme == .dark ? Color.black.opacity(0.45) : Color.black.opacity(0.15)
+    }
+    
+    private var dividerColor: Color {
+        theme.border.opacity(0.8)
+    }
+    
+    private func uiFont(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default) -> Font {
+        Font.system(size: size, weight: weight, design: design)
+    }
+    
     var body: some View {
-        ZStack {
-            // Main Content
-            VStack(spacing: 0) {
-                // Spacer for header area
-                Color.clear
-                    .frame(height: 60)
-                
-                // Lyrics Display
-                lyricsView
-                
-                // Embedded Progress Bar
-                progressBarView
-            }
+        GeometryReader { proxy in
+            let metrics = ResponsiveMetrics(
+                size: proxy.size,
+                fontScale: settings.fontScale,
+                isMinimized: isMinimized
+            )
             
-            // Floating Header (visible on hover)
-            VStack {
-                if isHovering {
-                    headerView
-                        .transition(
-                            .asymmetric(
-                                insertion: .move(edge: .top).combined(with: .opacity).combined(with: .scale(scale: 0.95)),
-                                removal: .move(edge: .top).combined(with: .opacity).combined(with: .scale(scale: 0.95))
-                            )
-                        )
+            ZStack {
+                VStack(spacing: 0) {
+                    Color.clear
+                        .frame(height: metrics.headerReservedHeight)
+                    
+                    lyricsView(metrics: metrics)
+                    
+                    progressBarView(metrics: metrics)
+                        .padding(.bottom, metrics.progressBottomPadding)
                 }
-                Spacer()
-            }
-            
-            // Settings Panel (slides from right)
-            if showSettings {
-                HStack {
+                
+                VStack {
+                    if isHovering {
+                        headerView(metrics: metrics)
+                            .transition(
+                                .asymmetric(
+                                    insertion: .move(edge: .top)
+                                        .combined(with: .opacity)
+                                        .combined(with: .scale(scale: 0.95)),
+                                    removal: .move(edge: .top)
+                                        .combined(with: .opacity)
+                                        .combined(with: .scale(scale: 0.95))
+                                )
+                            )
+                    }
                     Spacer()
-                    settingsPanel
-                        .transition(
-                            .asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .trailing).combined(with: .opacity)
+                }
+                
+                if showSettings {
+                    HStack {
+                        Spacer()
+                        settingsPanel(metrics: metrics)
+                            .frame(width: metrics.settingsWidth)
+                            .transition(
+                                .asymmetric(
+                                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                                    removal: .move(edge: .trailing).combined(with: .opacity)
+                                )
                             )
-                        )
+                    }
                 }
             }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(settings.backgroundColor)
-        .clipShape(RoundedRectangle(cornerRadius: settings.cornerRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: settings.cornerRadius)
-                .stroke(Color.black.opacity(0.15), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 10)
-        .opacity(settings.windowOpacity)
-        .onHover { hovering in
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                isHovering = hovering
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(theme.background)
+            .clipShape(RoundedRectangle(cornerRadius: settings.cornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: settings.cornerRadius)
+                    .stroke(borderColor, lineWidth: 1)
+            )
+            .shadow(color: shadowColor, radius: 20, x: 0, y: 10)
+            .opacity(settings.windowOpacity)
+            .onHover { hovering in
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    isHovering = hovering
+                }
             }
-        }
-        .onAppear {
-            startTimer()
-        }
-        .onDisappear {
-            stopTimer()
+            .onAppear {
+                startTimer()
+            }
+            .onDisappear {
+                stopTimer()
+            }
         }
     }
     
     // MARK: - Header View
     
-    private var headerView: some View {
-        HStack(spacing: 12) {
-            // Song Icon
+    @ViewBuilder
+    private func headerView(metrics: ResponsiveMetrics) -> some View {
+        let buttonSide: CGFloat = metrics.isCompactWidth ? 30 : 34
+        HStack(spacing: metrics.isCompactWidth ? 10 : 14) {
             Image(systemName: "music.note")
-                .font(.system(size: 20))
-                .foregroundColor(.black.opacity(0.7))
-                .frame(width: 40, height: 40)
-                .background(Color.black.opacity(0.05))
+                .font(uiFont(size: metrics.headerIconSize))
+                .foregroundColor(theme.iconColor)
+                .frame(width: buttonSide, height: buttonSide)
+                .background(theme.primaryText.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             
-            // Song Info
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: metrics.isCompactWidth ? 1 : 2) {
                 if noPlaybackDetected {
                     Text("No Playback")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.black)
+                        .font(uiFont(size: metrics.headerTitleSize, weight: .semibold))
+                        .foregroundColor(theme.primaryText)
                     Text("Play music to see lyrics")
-                        .font(.system(size: 12))
-                        .foregroundColor(.black.opacity(0.5))
+                        .font(uiFont(size: metrics.headerSubtitleSize))
+                        .foregroundColor(theme.mutedText(0.5))
                 } else {
                     Text(song.title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.black)
+                        .font(uiFont(size: metrics.headerTitleSize, weight: .semibold))
+                        .foregroundColor(theme.primaryText)
                         .lineLimit(1)
                     Text(song.artist)
-                        .font(.system(size: 12))
-                        .foregroundColor(.black.opacity(0.5))
+                        .font(uiFont(size: metrics.headerSubtitleSize))
+                        .foregroundColor(theme.mutedText(0.5))
                         .lineLimit(1)
                 }
             }
             
             Spacer()
             
-            // Control Buttons
-            HStack(spacing: 8) {
-                // Settings Button
-                Button(action: {
+            HStack(spacing: metrics.isCompactWidth ? 6 : 8) {
+                controlButton(
+                    systemImage: showSettings ? "gearshape.fill" : "gearshape",
+                    size: metrics.headerButtonSize
+                ) {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                         showSettings.toggle()
                     }
-                }) {
-                    Image(systemName: showSettings ? "gearshape.fill" : "gearshape")
-                        .font(.system(size: 16))
-                        .foregroundColor(.black.opacity(0.6))
-                        .frame(width: 32, height: 32)
                 }
-                .buttonStyle(PlainButtonStyle())
-                .onHover { _ in NSCursor.arrow.set() }
                 
-                // Minimize/Fullscreen Button
-                Button(action: {
+                controlButton(
+                    systemImage: isMinimized ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                    size: metrics.headerButtonSize
+                ) {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                         isMinimized.toggle()
                     }
-                }) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 16))
-                        .foregroundColor(.black.opacity(0.6))
-                        .frame(width: 32, height: 32)
                 }
-                .buttonStyle(PlainButtonStyle())
-                .onHover { _ in NSCursor.arrow.set() }
                 
-                // Close Button
-                Button(action: {
+                controlButton(systemImage: "xmark", size: metrics.headerButtonSize) {
                     NSApplication.shared.terminate(nil)
-                }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16))
-                        .foregroundColor(.black.opacity(0.6))
-                        .frame(width: 32, height: 32)
                 }
-                .buttonStyle(PlainButtonStyle())
-                .onHover { _ in NSCursor.arrow.set() }
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.horizontal, metrics.headerHorizontalPadding)
+        .padding(.vertical, metrics.headerVerticalPadding)
+        .frame(maxWidth: metrics.isWideWidth ? min(metrics.width * 0.75, 760) : .infinity)
         .frame(maxWidth: .infinity)
         .background(
-            settings.headerColor.opacity(0.95)
+            theme.header.opacity(0.95)
                 .blur(radius: 10)
         )
-        .background(settings.headerColor)
+        .background(theme.header)
+    }
+    
+    private func controlButton(systemImage: String, size: CGFloat, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(uiFont(size: size))
+                .foregroundColor(theme.iconColor)
+                .frame(width: size + 12, height: size + 12)
+                .background(theme.controlSurface.opacity(0.85))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { _ in NSCursor.arrow.set() }
     }
     
     
     // MARK: - Lyrics View
     
-    private var lyricsView: some View {
-        VStack(spacing: 0) {
+    @ViewBuilder
+    private func lyricsView(metrics: ResponsiveMetrics) -> some View {
+        VStack(spacing: metrics.lyricsVerticalSpacing) {
             if isLoadingLyrics {
-                // Loading state
                 VStack(spacing: 12) {
                     ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Fetching lyrics...")
-                        .font(.system(size: 14))
-                        .foregroundColor(.black.opacity(0.4))
+                        .scaleEffect(metrics.isCompactWidth ? 0.7 : 0.8)
+                        .tint(theme.accent)
+                    Text("Fetching lyrics…")
+                        .font(uiFont(size: metrics.isCompactWidth ? 13 : 14))
+                        .foregroundColor(theme.mutedText(0.45))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = lyricsError {
-                // Error state
-                VStack(spacing: 12) {
-                    Image(systemName: error == "Instrumental track" ? "music.note" : "exclamationmark.triangle")
-                        .font(.system(size: 36))
-                        .foregroundColor(.black.opacity(0.2))
-                    Text(error)
-                        .font(.system(size: 14))
-                        .foregroundColor(.black.opacity(0.4))
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                placeholderView(
+                    systemImage: error == "Instrumental track" ? "music.note" : "exclamationmark.triangle",
+                    message: error,
+                    metrics: metrics
+                )
             } else if song.lyrics.isEmpty {
-                // No lyrics state
-                VStack(spacing: 12) {
-                    Image(systemName: "music.note.list")
-                        .font(.system(size: 36))
-                        .foregroundColor(.black.opacity(0.2))
-                    Text("No lyrics available")
-                        .font(.system(size: 14))
-                        .foregroundColor(.black.opacity(0.4))
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                placeholderView(
+                    systemImage: "music.note.list",
+                    message: "No lyrics available",
+                    metrics: metrics
+                )
             } else {
-                // Normal lyrics display
-                Spacer()
+                Spacer(minLength: metrics.lyricsVerticalGutter)
                 ForEach(Array(getVisibleLines().enumerated()), id: \.element.id) { offset, item in
                     LyricLineView(
                         line: item.line,
                         isCurrent: item.index == currentLineIndex,
-                        isPast: item.index < currentLineIndex
+                        isPast: item.index < currentLineIndex,
+                        theme: theme,
+                        metrics: metrics
                     )
                     .transition(
                         .asymmetric(
@@ -573,219 +839,227 @@ struct LyricsWidgetView: View {
                         value: item.index == currentLineIndex
                     )
                 }
-                Spacer()
+                Spacer(minLength: metrics.lyricsVerticalGutter)
             }
         }
+        .padding(.horizontal, metrics.contentHorizontalPadding)
+        .frame(maxWidth: metrics.isWideWidth ? min(metrics.width * 0.75, 760) : .infinity)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 40)
-        .background(settings.backgroundColor)
+    }
+    
+    private func placeholderView(systemImage: String, message: String, metrics: ResponsiveMetrics) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(uiFont(size: metrics.isCompactWidth ? 30 : 36))
+                .foregroundColor(theme.mutedText(0.25))
+            Text(message)
+                .font(uiFont(size: metrics.isCompactWidth ? 13 : 14))
+                .foregroundColor(theme.mutedText(0.45))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     // MARK: - Progress Bar View
     
-    private var progressBarView: some View {
-        VStack(spacing: 8) {
-            // Progress Bar
+    private func progressBarView(metrics: ResponsiveMetrics) -> some View {
+        VStack(spacing: metrics.isCompactWidth ? 6 : 8) {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
-                    // Background
                     Rectangle()
-                        .fill(Color.black.opacity(0.05))
-                        .frame(height: 3)
+                        .fill(theme.progressTrack)
+                        .frame(height: metrics.progressHeight)
                     
-                    // Progress
                     Rectangle()
-                        .fill(Color.black.opacity(0.8))
-                        .frame(width: geometry.size.width * CGFloat(songDuration > 0 ? currentTime / songDuration : 0), height: 3)
+                        .fill(theme.progressFill)
+                        .frame(
+                            width: geometry.size.width * CGFloat(songDuration > 0 ? currentTime / songDuration : 0),
+                            height: metrics.progressHeight
+                        )
                         .animation(.easeOut(duration: 0.2), value: currentTime)
                 }
             }
-            .frame(height: 3)
+            .frame(height: metrics.progressHeight)
             
-            // Time Display
             HStack {
                 Text(formatTime(currentTime))
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(.black.opacity(0.4))
+                    .font(uiFont(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(theme.mutedText(0.48))
                 
                 Spacer()
                 
                 Text(formatTime(songDuration))
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(.black.opacity(0.4))
+                    .font(uiFont(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(theme.mutedText(0.48))
             }
-            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity)
         }
-        .padding(.bottom, 16)
+        .padding(.horizontal, metrics.contentHorizontalPadding)
+        .frame(maxWidth: metrics.isWideWidth ? min(metrics.width * 0.75, 760) : .infinity)
+        .frame(maxWidth: .infinity)
     }
     
     // MARK: - Settings Panel
     
-    private var settingsPanel: some View {
-        GeometryReader { geometry in
-            VStack(alignment: .leading, spacing: 20) {
-                // Header
-                HStack {
-                    Text("Settings")
-                        .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .foregroundColor(.black)
-                    
-                    Spacer()
-                    
-                    Button(action: {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                            showSettings = false
-                        }
-                    }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14))
-                            .foregroundColor(.black.opacity(0.6))
-                            .frame(width: 28, height: 28)
+    @ViewBuilder
+    private func settingsPanel(metrics: ResponsiveMetrics) -> some View {
+        let sectionSpacing = metrics.settingsSectionSpacing
+        let controlSpacing = metrics.settingsControlSpacing
+        let gridColumns = [GridItem(.adaptive(minimum: metrics.isCompactWidth ? 100 : 112), spacing: controlSpacing)]
+        
+        let content = VStack(alignment: .leading, spacing: sectionSpacing) {
+            HStack {
+                Text("Settings")
+                    .font(uiFont(size: metrics.isCompactWidth ? 17 : 18, weight: .bold, design: .monospaced))
+                    .foregroundColor(theme.primaryText)
+                
+                Spacer()
+                
+                Button(action: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        showSettings = false
                     }
-                    .buttonStyle(PlainButtonStyle())
-                    .onHover { _ in NSCursor.arrow.set() }
+                }) {
+                    Image(systemName: "xmark")
+                        .font(uiFont(size: metrics.headerButtonSize))
+                        .foregroundColor(theme.iconColor)
+                        .padding(8)
+                        .background(theme.controlSurface.opacity(0.85))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
+                .buttonStyle(PlainButtonStyle())
+                .onHover { _ in NSCursor.arrow.set() }
+            }
             
-            Divider()
-                .background(Color.black.opacity(0.1))
+            Divider().background(dividerColor)
             
-            // Window Opacity
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: controlSpacing) {
+                Text("Theme")
+                    .font(uiFont(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundColor(theme.mutedText(0.7))
+                
+                Picker("Theme Mode", selection: $settings.themeMode) {
+                    ForEach(ThemeMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(SegmentedPickerStyle())
+                .labelsHidden()
+            }
+            
+            if settings.themeMode == .manual {
+                LazyVGrid(columns: gridColumns, spacing: controlSpacing) {
+                    ForEach(ThemePreset.allCases) { preset in
+                        ThemePresetButton(
+                            preset: preset,
+                            isSelected: preset == settings.manualTheme,
+                            highlightColor: theme.accent
+                        ) {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                settings.manualTheme = preset
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text("Following macOS appearance")
+                    .font(uiFont(size: 12))
+                    .foregroundColor(theme.mutedText(0.55))
+            }
+            
+            Divider().background(dividerColor)
+            
+            VStack(alignment: .leading, spacing: controlSpacing) {
                 HStack {
                     Text("Window Opacity")
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundColor(.black.opacity(0.7))
+                        .font(uiFont(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundColor(theme.mutedText(0.75))
                     Spacer()
                     Text("\(Int(settings.windowOpacity * 100))%")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundColor(.black.opacity(0.5))
+                        .font(uiFont(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(theme.mutedText(0.55))
                 }
                 
                 Slider(value: $settings.windowOpacity, in: 0.3...1.0, step: 0.05)
-                    .accentColor(.black)
+                    .accentColor(theme.accent)
             }
             
-            // Corner Radius
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: controlSpacing) {
                 HStack {
                     Text("Corner Radius")
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundColor(.black.opacity(0.7))
+                        .font(uiFont(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundColor(theme.mutedText(0.75))
                     Spacer()
                     Text("\(Int(settings.cornerRadius))px")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundColor(.black.opacity(0.5))
+                        .font(uiFont(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(theme.mutedText(0.55))
                 }
                 
                 Slider(value: $settings.cornerRadius, in: 0...40, step: 2)
-                    .accentColor(.black)
+                    .accentColor(theme.accent)
             }
             
-            Divider()
-                .background(Color.black.opacity(0.1))
+            Divider().background(dividerColor)
             
-            // Background Color Presets
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Background Color")
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.black.opacity(0.7))
-                
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 45))], spacing: 8) {
-                    // Beige (default)
-                    ColorPresetButton(
-                        color: Color(red: 245/255, green: 241/255, blue: 232/255),
-                        isSelected: settings.backgroundColor.isClose(to: Color(red: 245/255, green: 241/255, blue: 232/255))
-                    ) {
-                        settings.backgroundColor = Color(red: 245/255, green: 241/255, blue: 232/255)
-                        settings.headerColor = Color(red: 238/255, green: 234/255, blue: 222/255)
-                    }
-                    
-                    // White
-                    ColorPresetButton(
-                        color: .white,
-                        isSelected: settings.backgroundColor.isClose(to: .white)
-                    ) {
-                        settings.backgroundColor = .white
-                        settings.headerColor = Color(white: 0.95)
-                    }
-                    
-                    // Light Gray
-                    ColorPresetButton(
-                        color: Color(white: 0.92),
-                        isSelected: settings.backgroundColor.isClose(to: Color(white: 0.92))
-                    ) {
-                        settings.backgroundColor = Color(white: 0.92)
-                        settings.headerColor = Color(white: 0.88)
-                    }
-                    
-                    // Light Blue
-                    ColorPresetButton(
-                        color: Color(red: 230/255, green: 240/255, blue: 250/255),
-                        isSelected: settings.backgroundColor.isClose(to: Color(red: 230/255, green: 240/255, blue: 250/255))
-                    ) {
-                        settings.backgroundColor = Color(red: 230/255, green: 240/255, blue: 250/255)
-                        settings.headerColor = Color(red: 220/255, green: 235/255, blue: 245/255)
-                    }
-                    
-                    // Light Pink
-                    ColorPresetButton(
-                        color: Color(red: 250/255, green: 235/255, blue: 240/255),
-                        isSelected: settings.backgroundColor.isClose(to: Color(red: 250/255, green: 235/255, blue: 240/255))
-                    ) {
-                        settings.backgroundColor = Color(red: 250/255, green: 235/255, blue: 240/255)
-                        settings.headerColor = Color(red: 245/255, green: 225/255, blue: 235/255)
-                    }
-                    
-                    // Light Green
-                    ColorPresetButton(
-                        color: Color(red: 235/255, green: 245/255, blue: 235/255),
-                        isSelected: settings.backgroundColor.isClose(to: Color(red: 235/255, green: 245/255, blue: 235/255))
-                    ) {
-                        settings.backgroundColor = Color(red: 235/255, green: 245/255, blue: 235/255)
-                        settings.headerColor = Color(red: 225/255, green: 240/255, blue: 225/255)
-                    }
-                }
-            }
-            
-            Spacer()
-            
-            // Reset Button
-            Button(action: {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
-                    settings.windowOpacity = 1.0
-                    settings.cornerRadius = 16.0
-                    settings.backgroundColor = Color(red: 245/255, green: 241/255, blue: 232/255)
-                    settings.headerColor = Color(red: 238/255, green: 234/255, blue: 222/255)
-                }
-            }) {
+            VStack(alignment: .leading, spacing: controlSpacing) {
                 HStack {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 12))
-                    Text("Reset to Defaults")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    Text("Lyric Font Size")
+                        .font(uiFont(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundColor(theme.mutedText(0.75))
+                    Spacer()
+                    Text("\(Int(settings.fontScale * 100))%")
+                        .font(uiFont(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(theme.mutedText(0.55))
                 }
-                .foregroundColor(.black.opacity(0.6))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(Color.black.opacity(0.05))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                
+                Slider(value: $settings.fontScale, in: 0.8...1.4, step: 0.05)
+                    .accentColor(theme.accent)
+                
+                Text("In the silence of the night")
+                    .font(
+                        .system(
+                            size: 20 * settings.fontScale,
+                            weight: .semibold,
+                            design: .monospaced
+                        )
+                    )
+                    .foregroundColor(theme.primaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, metrics.isCompactWidth ? 8 : 10)
+                    .padding(.horizontal, 12)
+                    .background(theme.controlSurface.opacity(0.85))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-            .buttonStyle(PlainButtonStyle())
-            .onHover { _ in NSCursor.arrow.set() }
-            }
-            .padding(20)
-            .frame(width: min(280, geometry.size.width * 0.45))
-            .frame(maxHeight: .infinity)
-            .background(settings.headerColor)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.black.opacity(0.1), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.2), radius: 15, x: -5, y: 0)
-            .padding(.trailing, 8)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        
+        Group {
+            if metrics.settingsShouldScroll {
+                ScrollView {
+                    content
+                        .padding(.vertical, metrics.settingsEdgePadding)
+                        .padding(.horizontal, metrics.settingsEdgePadding)
+                }
+            } else {
+                VStack(spacing: 0) {
+                    content
+                    Spacer()
+                }
+                .padding(metrics.settingsEdgePadding)
+            }
+        }
+        .frame(maxHeight: .infinity)
+        .background(theme.header)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(borderColor, lineWidth: 1)
+        )
+        .shadow(color: shadowColor.opacity(0.9), radius: 15, x: -5, y: 0)
+        .padding(.trailing, metrics.isCompactWidth ? 6 : 8)
     }
+    
     
     // MARK: - Playback Controls (Commented Out)
     /*
@@ -984,58 +1258,57 @@ struct LyricsWidgetView: View {
     }
 }
 
-// MARK: - Color Preset Button
+// MARK: - Theme Preset Button
 
-struct ColorPresetButton: View {
-    let color: Color
+struct ThemePresetButton: View {
+    let preset: ThemePreset
     let isSelected: Bool
+    let highlightColor: Color
     let action: () -> Void
     
     var body: some View {
         Button(action: action) {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(color)
-                .frame(width: 45, height: 45)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.black.opacity(isSelected ? 0.4 : 0.15), lineWidth: isSelected ? 2 : 1)
-                )
-                .overlay(
-                    isSelected ? Image(systemName: "checkmark")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.black.opacity(0.6))
-                    : nil
-                )
+            VStack(spacing: 6) {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(
+                        LinearGradient(
+                            colors: [preset.palette.background, preset.palette.header],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(height: 52)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(isSelected ? highlightColor : preset.palette.border.opacity(0.8), lineWidth: isSelected ? 2 : 1)
+                    )
+                    .overlay(
+                        Group {
+                            if isSelected {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundColor(highlightColor)
+                                    .padding(6)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            }
+                        }
+                    )
+                
+                Text(preset.displayName)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(preset.palette.primaryText.opacity(isSelected ? 0.85 : 0.7))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity)
+            }
+            .padding(6)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(preset.palette.background.opacity(0.15))
+            )
         }
         .buttonStyle(PlainButtonStyle())
         .onHover { _ in NSCursor.arrow.set() }
-    }
-}
-
-// MARK: - Color Extension
-
-extension Color {
-    func isClose(to otherColor: Color) -> Bool {
-        // Simple comparison for color presets
-        let selfComponents = self.cgColor?.components ?? []
-        let otherComponents = otherColor.cgColor?.components ?? []
-        
-        guard selfComponents.count >= 3, otherComponents.count >= 3 else {
-            return false
-        }
-        
-        let threshold: CGFloat = 0.01
-        return abs(selfComponents[0] - otherComponents[0]) < threshold &&
-               abs(selfComponents[1] - otherComponents[1]) < threshold &&
-               abs(selfComponents[2] - otherComponents[2]) < threshold
-    }
-    
-    var cgColor: CGColor? {
-        #if canImport(AppKit)
-        return NSColor(self).cgColor
-        #else
-        return nil
-        #endif
     }
 }
 
@@ -1045,24 +1318,30 @@ struct LyricLineView: View {
     let line: LyricLine
     let isCurrent: Bool
     let isPast: Bool
+    let theme: ThemePalette
+    let metrics: ResponsiveMetrics
     
     var body: some View {
+        let fontSize = isCurrent ? metrics.lyricCurrentSize : metrics.lyricSecondarySize
+        let scale = isCurrent ? metrics.lyricCurrentScale : metrics.lyricSecondaryScale
         Text(line.text)
-            .font(.system(
-                size: isCurrent ? 32 : 20,
-                weight: isCurrent ? .bold : .regular,
-                design: .monospaced
-            ))
-            .foregroundColor(isCurrent ? .black : .black.opacity(isPast ? 0.3 : 0.25))
+            .font(
+                .system(
+                    size: fontSize,
+                    weight: isCurrent ? .bold : .regular,
+                    design: .monospaced
+                )
+            )
+            .foregroundColor(isCurrent ? theme.primaryText : theme.primaryText.opacity(isPast ? 0.3 : 0.25))
             .multilineTextAlignment(.center)
             .lineLimit(nil)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.vertical, isCurrent ? 16 : 12)
-            .padding(.horizontal, 20)
-            .scaleEffect(isCurrent ? 1.05 : 0.92)
-            .blur(radius: isCurrent ? 0 : 3.5)
+            .padding(.vertical, metrics.lyricVerticalPadding)
+            .padding(.horizontal, metrics.lyricHorizontalPadding)
+            .scaleEffect(scale)
+            .blur(radius: isCurrent ? 0 : metrics.lyricBlurRadius)
             .shadow(
-                color: isCurrent ? .black.opacity(0.08) : .clear,
+                color: isCurrent ? theme.primaryText.opacity(0.12) : .clear,
                 radius: isCurrent ? 12 : 0,
                 x: 0,
                 y: isCurrent ? 4 : 0
