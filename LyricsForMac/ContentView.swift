@@ -9,13 +9,20 @@ import SwiftUI
 import AppKit
 import Combine
 import Carbon
+import CryptoKit
 
 // MARK: - Data Models
 
-struct LyricLine: Identifiable {
-    let id = UUID()
+struct LyricLine: Identifiable, Codable {
+    let id: UUID
     let time: Double
     let text: String
+    
+    init(id: UUID = UUID(), time: Double, text: String) {
+        self.id = id
+        self.time = time
+        self.text = text
+    }
 }
 
 extension AppDelegate: NSWindowDelegate {
@@ -67,6 +74,10 @@ struct LRCLIBResponse: Codable {
 
 class LyricsService {
     static func fetchLyrics(title: String, artist: String, duration: Double) async -> [LyricLine]? {
+        if let cached = await LyricsCache.shared.cachedLyrics(title: title, artist: artist, duration: duration) {
+            return cached
+        }
+        
         // Build URL with query parameters
         var components = URLComponents(string: "https://lrclib.net/api/get")!
         components.queryItems = [
@@ -106,19 +117,24 @@ class LyricsService {
             // Check if instrumental
             if result.instrumental == true {
                 print("🎼 Track is instrumental (no lyrics)")
+                await LyricsCache.shared.store(lyrics: [], title: title, artist: artist, duration: duration)
                 return []
             }
             
             // Try synced lyrics first (preferred)
             if let syncedLyrics = result.syncedLyrics {
                 print("✅ Found synced lyrics!")
-                return parseLRC(syncedLyrics)
+                let parsed = parseLRC(syncedLyrics)
+                await LyricsCache.shared.store(lyrics: parsed, title: title, artist: artist, duration: duration)
+                return parsed
             }
             
             // Fallback to plain lyrics (no timestamps)
             if let plainLyrics = result.plainLyrics {
                 print("⚠️ Found plain lyrics only (no timestamps)")
-                return parsePlainLyrics(plainLyrics)
+                let parsed = parsePlainLyrics(plainLyrics)
+                await LyricsCache.shared.store(lyrics: parsed, title: title, artist: artist, duration: duration)
+                return parsed
             }
             
             print("❌ No lyrics available")
@@ -167,6 +183,176 @@ class LyricsService {
         return lines.enumerated().map { index, text in
             LyricLine(time: Double(index) * 3.0, text: text)
         }
+    }
+}
+
+struct CacheStats {
+    static let empty = CacheStats(entries: 0, diskBytes: 0)
+    let entries: Int
+    let diskBytes: UInt64
+}
+
+actor LyricsCache {
+    static let shared = LyricsCache()
+    
+    private let memoryCache: NSCache<NSString, CacheEntry>
+    private let fileManager: FileManager
+    private let cacheDirectory: URL
+    private let maxDiskEntries = 200
+    private var isEnabled: Bool
+    private static let cachingEnabledKey = "LyricsCacheEnabled"
+    
+    private init() {
+        let cache = NSCache<NSString, CacheEntry>()
+        cache.countLimit = 150
+        
+        let fm = FileManager.default
+        let baseURL = fm.urls(for: .cachesDirectory, in: .userDomainMask).first ?? fm.temporaryDirectory
+        let directoryName = (Bundle.main.bundleIdentifier ?? "LyricsForMac") + ".lyrics"
+        let directory = baseURL.appendingPathComponent(directoryName, isDirectory: true)
+        
+        if !fm.fileExists(atPath: directory.path) {
+            try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        
+        let storedValue = UserDefaults.standard.object(forKey: Self.cachingEnabledKey) as? Bool
+        if storedValue == nil {
+            UserDefaults.standard.set(true, forKey: Self.cachingEnabledKey)
+        }
+        let enabled = storedValue ?? true
+        
+        self.memoryCache = cache
+        self.fileManager = fm
+        self.cacheDirectory = directory
+        self.isEnabled = enabled
+    }
+    
+    func setEnabled(_ enabled: Bool) {
+        guard isEnabled != enabled else { return }
+        isEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.cachingEnabledKey)
+        if !enabled {
+            memoryCache.removeAllObjects()
+        }
+    }
+    
+    func isCachingEnabled() -> Bool {
+        isEnabled
+    }
+    
+    func cachedLyrics(title: String, artist: String, duration: Double) -> [LyricLine]? {
+        guard isEnabled else { return nil }
+        let key = cacheKey(title: title, artist: artist, duration: duration)
+        
+        if let entry = memoryCache.object(forKey: key as NSString) {
+            return entry.lyrics
+        }
+        
+        let url = fileURL(forKey: key)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        
+        do {
+            let payload = try JSONDecoder().decode(CachePayload.self, from: data)
+            memoryCache.setObject(CacheEntry(lyrics: payload.lyrics), forKey: key as NSString)
+            return payload.lyrics
+        } catch {
+            try? fileManager.removeItem(at: url)
+            return nil
+        }
+    }
+    
+    func store(lyrics: [LyricLine], title: String, artist: String, duration: Double) {
+        guard isEnabled else { return }
+        let key = cacheKey(title: title, artist: artist, duration: duration)
+        memoryCache.setObject(CacheEntry(lyrics: lyrics), forKey: key as NSString)
+        
+        let payload = CachePayload(lyrics: lyrics, storedAt: Date())
+        do {
+            let data = try JSONEncoder().encode(payload)
+            let url = fileURL(forKey: key)
+            try data.write(to: url, options: .atomic)
+            try pruneIfNeeded()
+        } catch {
+            // Ignore disk failures silently
+        }
+    }
+    
+    func clear() async {
+        memoryCache.removeAllObjects()
+        let urls = (try? fileManager.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil)) ?? []
+        for url in urls {
+            try? fileManager.removeItem(at: url)
+        }
+    }
+    
+    func currentStats() -> CacheStats {
+        let urls = (try? fileManager.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+        var total: UInt64 = 0
+        for url in urls {
+            if let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+               let size = values.fileSize {
+                total += UInt64(size)
+            }
+        }
+        return CacheStats(entries: urls.count, diskBytes: total)
+    }
+    
+    private func cacheKey(title: String, artist: String, duration: Double) -> String {
+        let normalizedTitle = normalize(string: title)
+        let normalizedArtist = normalize(string: artist)
+        let roundedDuration = Int(duration.rounded())
+        return "\(normalizedArtist)|\(normalizedTitle)|\(roundedDuration)"
+    }
+    
+    private func normalize(string: String) -> String {
+        string
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    }
+    
+    private func fileURL(forKey key: String) -> URL {
+        cacheDirectory.appendingPathComponent(Self.hash(key)).appendingPathExtension("json")
+    }
+    
+    private static func hash(_ string: String) -> String {
+        let digest = SHA256.hash(data: Data(string.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+    
+    private func pruneIfNeeded() throws {
+        let urls = try fileManager.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        )
+        
+        guard urls.count > maxDiskEntries else { return }
+        
+        let sorted = urls.compactMap { url -> (URL, Date) in
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+            return (url, values?.contentModificationDate ?? .distantPast)
+        }.sorted { $0.1 < $1.1 }
+        
+        let excess = sorted.count - maxDiskEntries
+        guard excess > 0 else { return }
+        
+        for index in 0..<excess {
+            try? fileManager.removeItem(at: sorted[index].0)
+        }
+    }
+    
+    private final class CacheEntry: NSObject {
+        let lyrics: [LyricLine]
+        
+        init(lyrics: [LyricLine]) {
+            self.lyrics = lyrics
+        }
+    }
+    
+    private struct CachePayload: Codable {
+        let lyrics: [LyricLine]
+        let storedAt: Date
     }
 }
 
@@ -566,11 +752,31 @@ struct ResponsiveMetrics {
 // MARK: - Settings Model
 
 class AppSettings: ObservableObject {
+    private let cachingEnabledKey = "LyricsCacheEnabled"
+    
     @Published var windowOpacity: Double = 1.0
     @Published var cornerRadius: Double = 16.0
     @Published var themeMode: ThemeMode = .matchSystem
     @Published var manualTheme: ThemePreset = .desert
     @Published var fontScale: Double = 1.0
+    @Published var cachingEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(cachingEnabled, forKey: cachingEnabledKey)
+            Task {
+                await LyricsCache.shared.setEnabled(cachingEnabled)
+            }
+        }
+    }
+    @Published var cacheStats: CacheStats = .empty
+    
+    init() {
+        let stored = UserDefaults.standard.object(forKey: cachingEnabledKey) as? Bool ?? true
+        _cachingEnabled = Published(initialValue: stored)
+        
+        Task {
+            await LyricsCache.shared.setEnabled(stored)
+        }
+    }
     
     func palette(for colorScheme: ColorScheme) -> ThemePalette {
         switch themeMode {
@@ -587,6 +793,8 @@ class AppSettings: ObservableObject {
         themeMode = .matchSystem
         manualTheme = .desert
         fontScale = 1.0
+        cachingEnabled = true
+        cacheStats = .empty
     }
 }
 
@@ -627,6 +835,20 @@ struct LyricsWidgetView: View {
     
     private var dividerColor: Color {
         theme.border.opacity(0.8)
+    }
+    
+    private var cacheSummary: String {
+        let stats = settings.cacheStats
+        guard stats.entries > 0 else { return "Empty" }
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB]
+        formatter.countStyle = .file
+        let sizeString = formatter.string(fromByteCount: Int64(stats.diskBytes))
+        return "\(stats.entries) · \(sizeString)"
+    }
+    
+    private var hasCacheContent: Bool {
+        settings.cacheStats.entries > 0 || settings.cacheStats.diskBytes > 0
     }
     
     private func uiFont(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default) -> Font {
@@ -692,18 +914,19 @@ struct LyricsWidgetView: View {
             )
             .shadow(color: shadowColor, radius: 20, x: 0, y: 10)
             .opacity(settings.windowOpacity)
-            .onHover { hovering in
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                    isHovering = hovering
-                }
-            }
-            .onAppear {
-                startTimer()
-            }
-            .onDisappear {
-                stopTimer()
+        .onHover { hovering in
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                isHovering = hovering
             }
         }
+        .onAppear {
+            startTimer()
+            Task { await refreshCacheStats() }
+        }
+        .onDisappear {
+            stopTimer()
+        }
+    }
     }
     
     // MARK: - Header View
@@ -1031,6 +1254,56 @@ struct LyricsWidgetView: View {
                     .background(theme.controlSurface.opacity(0.85))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
+            
+            Divider().background(dividerColor)
+            
+            VStack(alignment: .leading, spacing: controlSpacing) {
+                HStack {
+                    Text("Lyrics Cache")
+                        .font(uiFont(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundColor(theme.mutedText(0.75))
+                    Spacer()
+                    Text(cacheSummary)
+                        .font(uiFont(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(theme.mutedText(0.55))
+                }
+                
+                Toggle(isOn: $settings.cachingEnabled) {
+                    Text("Enable caching")
+                        .font(uiFont(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(theme.primaryText)
+                }
+                .toggleStyle(SwitchToggleStyle(tint: theme.accent))
+                .onChange(of: settings.cachingEnabled, initial: false) { _, _ in
+                    Task { await refreshCacheStats() }
+                }
+                
+                Button(action: {
+                    Task {
+                        await LyricsCache.shared.clear()
+                        await refreshCacheStats()
+                    }
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "trash")
+                            .font(uiFont(size: 12))
+                        Text("Clear Cached Lyrics")
+                            .font(uiFont(size: 12, weight: .medium, design: .monospaced))
+                    }
+                    .foregroundColor(theme.primaryText)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(theme.controlSurface.opacity(0.9))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(borderColor.opacity(0.6), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(!hasCacheContent)
+                .opacity(hasCacheContent ? 1.0 : 0.5)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         
@@ -1169,6 +1442,13 @@ struct LyricsWidgetView: View {
         timer = nil
     }
     
+    private func refreshCacheStats() async {
+        let stats = await LyricsCache.shared.currentStats()
+        await MainActor.run {
+            settings.cacheStats = stats
+        }
+    }
+    
     private func updateCurrentLine() {
         if let newIndex = song.lyrics.firstIndex(where: { line in
             let nextIndex = song.lyrics.firstIndex(where: { $0.time > line.time })
@@ -1250,6 +1530,7 @@ struct LyricsWidgetView: View {
                         isLoadingLyrics = false
                     }
                 }
+                await refreshCacheStats()
             }
         }
         
