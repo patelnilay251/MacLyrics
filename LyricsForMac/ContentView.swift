@@ -1414,9 +1414,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         registerGlobalHotKey()
         
         if let window = ensureLyricsWindow() {
-            NSApp.activate(ignoringOtherApps: true)
-            prepareWindowForDisplay(window)
-            window.makeKeyAndOrderFront(nil)
+            present(window: window, activateApp: true)
         }
     }
     
@@ -1509,6 +1507,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.isOpaque = false
         panel.hasShadow = false
         panel.isReleasedWhenClosed = false
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.becomesKeyOnlyIfNeeded = false
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.animationBehavior = .documentWindow
@@ -1561,21 +1562,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if window.isVisible {
             window.orderOut(nil)
         } else {
-            NSApp.activate(ignoringOtherApps: true)
-            prepareWindowForDisplay(window)
-            window.makeKeyAndOrderFront(nil)
+            present(window: window, activateApp: true)
         }
     }
     
     @objc private func showWindow() {
         guard let window = ensureLyricsWindow() else { return }
-        NSApp.activate(ignoringOtherApps: true)
-        prepareWindowForDisplay(window)
-        window.makeKeyAndOrderFront(nil)
+        present(window: window, activateApp: true)
     }
     
     @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
+    }
+    
+    private func present(window: NSPanel, activateApp: Bool) {
+        if activateApp {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        prepareWindowForDisplay(window)
+        window.level = .floating
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
     
     // MARK: - Hot Keys
