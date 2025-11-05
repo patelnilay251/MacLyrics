@@ -939,8 +939,6 @@ struct LyricsWidgetView: View {
                 .font(uiFont(size: metrics.headerIconSize))
                 .foregroundColor(theme.iconColor)
                 .frame(width: buttonSide, height: buttonSide)
-                .background(theme.primaryText.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
             
             VStack(alignment: .leading, spacing: metrics.isCompactWidth ? 1 : 2) {
                 if noPlaybackDetected {
@@ -992,11 +990,7 @@ struct LyricsWidgetView: View {
         .padding(.vertical, metrics.headerVerticalPadding)
         .frame(maxWidth: metrics.isWideWidth ? min(metrics.width * 0.75, 760) : .infinity)
         .frame(maxWidth: .infinity)
-        .background(
-            theme.header.opacity(0.95)
-                .blur(radius: 10)
-        )
-        .background(theme.header)
+        .background(Color.clear)
     }
     
     private func controlButton(systemImage: String, size: CGFloat, action: @escaping () -> Void) -> some View {
@@ -1005,8 +999,6 @@ struct LyricsWidgetView: View {
                 .font(uiFont(size: size))
                 .foregroundColor(theme.iconColor)
                 .frame(width: size + 12, height: size + 12)
-                .background(theme.controlSurface.opacity(0.85))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(PlainButtonStyle())
         .onHover { _ in NSCursor.arrow.set() }
