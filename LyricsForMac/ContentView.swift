@@ -813,6 +813,7 @@ struct LyricsWidgetView: View {
     @State private var isLoadingLyrics = false
     @State private var lyricsError: String? = nil
     @State private var isHovering = false
+    @State private var isPointerInside = false
     @State private var showSettings = false
     @StateObject private var settings = AppSettings()
     @Environment(\.colorScheme) private var colorScheme
@@ -890,20 +891,6 @@ struct LyricsWidgetView: View {
                     }
                     Spacer()
                 }
-                
-                if showSettings {
-                    HStack {
-                        Spacer()
-                        settingsPanel(metrics: metrics)
-                            .frame(width: metrics.settingsWidth)
-                            .transition(
-                                .asymmetric(
-                                    insertion: .move(edge: .trailing).combined(with: .opacity),
-                                    removal: .move(edge: .trailing).combined(with: .opacity)
-                                )
-                            )
-                    }
-                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(theme.background)
@@ -915,8 +902,14 @@ struct LyricsWidgetView: View {
             .shadow(color: shadowColor, radius: 20, x: 0, y: 10)
             .opacity(settings.windowOpacity)
         .onHover { hovering in
+            isPointerInside = hovering
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                isHovering = hovering
+                isHovering = hovering || showSettings
+            }
+        }
+        .onChange(of: showSettings, initial: false) { _, newValue in
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                isHovering = newValue || isPointerInside
             }
         }
         .onAppear {
@@ -963,14 +956,7 @@ struct LyricsWidgetView: View {
             Spacer()
             
             HStack(spacing: metrics.isCompactWidth ? 6 : 8) {
-                controlButton(
-                    systemImage: showSettings ? "gearshape.fill" : "gearshape",
-                    size: metrics.headerButtonSize
-                ) {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                        showSettings.toggle()
-                    }
-                }
+                settingsButton(metrics: metrics)
                 
                 controlButton(
                     systemImage: isMinimized ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
@@ -991,6 +977,24 @@ struct LyricsWidgetView: View {
         .frame(maxWidth: metrics.isWideWidth ? min(metrics.width * 0.75, 760) : .infinity)
         .frame(maxWidth: .infinity)
         .background(Color.clear)
+    }
+    
+    private func settingsButton(metrics: ResponsiveMetrics) -> some View {
+        Button(action: {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                showSettings.toggle()
+            }
+        }) {
+            Image(systemName: showSettings ? "gearshape.fill" : "gearshape")
+                .font(uiFont(size: metrics.headerButtonSize))
+                .foregroundColor(theme.iconColor)
+                .frame(width: metrics.headerButtonSize + 12, height: metrics.headerButtonSize + 12)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { _ in NSCursor.arrow.set() }
+        .popover(isPresented: $showSettings, arrowEdge: .top) {
+            settingsPopoverContent(metrics: metrics)
+        }
     }
     
     private func controlButton(systemImage: String, size: CGFloat, action: @escaping () -> Void) -> some View {
@@ -1115,13 +1119,14 @@ struct LyricsWidgetView: View {
         .frame(maxWidth: .infinity)
     }
     
-    // MARK: - Settings Panel
+    // MARK: - Settings Popover
     
     @ViewBuilder
-    private func settingsPanel(metrics: ResponsiveMetrics) -> some View {
+    private func settingsPopoverContent(metrics: ResponsiveMetrics) -> some View {
         let sectionSpacing = metrics.settingsSectionSpacing
         let controlSpacing = metrics.settingsControlSpacing
         let gridColumns = [GridItem(.adaptive(minimum: metrics.isCompactWidth ? 100 : 112), spacing: controlSpacing)]
+        let popoverWidth = max(320, min(metrics.settingsWidth, 400))
         
         let content = VStack(alignment: .leading, spacing: sectionSpacing) {
             HStack {
@@ -1132,16 +1137,11 @@ struct LyricsWidgetView: View {
                 Spacer()
                 
                 Button(action: {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                        showSettings = false
-                    }
+                    showSettings = false
                 }) {
                     Image(systemName: "xmark")
                         .font(uiFont(size: metrics.headerButtonSize))
                         .foregroundColor(theme.iconColor)
-                        .padding(8)
-                        .background(theme.controlSurface.opacity(0.85))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(PlainButtonStyle())
                 .onHover { _ in NSCursor.arrow.set() }
@@ -1299,30 +1299,26 @@ struct LyricsWidgetView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         
-        Group {
-            if metrics.settingsShouldScroll {
-                ScrollView {
-                    content
-                        .padding(.vertical, metrics.settingsEdgePadding)
-                        .padding(.horizontal, metrics.settingsEdgePadding)
-                }
-            } else {
-                VStack(spacing: 0) {
-                    content
-                    Spacer()
-                }
-                .padding(metrics.settingsEdgePadding)
-            }
+        ScrollView {
+            content
+                .padding(.vertical, metrics.settingsEdgePadding)
+                .padding(.horizontal, metrics.settingsEdgePadding)
         }
-        .frame(maxHeight: .infinity)
-        .background(theme.header)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(borderColor, lineWidth: 1)
+        .frame(width: popoverWidth)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(theme.header.opacity(0.35))
+                )
         )
-        .shadow(color: shadowColor.opacity(0.9), radius: 15, x: -5, y: 0)
-        .padding(.trailing, metrics.isCompactWidth ? 6 : 8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(borderColor.opacity(0.55), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: shadowColor.opacity(0.35), radius: 20, x: 0, y: 12)
     }
     
     
