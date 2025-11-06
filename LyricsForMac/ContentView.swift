@@ -726,9 +726,9 @@ struct ResponsiveMetrics {
     }
     
     var settingsWidth: CGFloat {
-        if width < 720 { return min(width * 0.9, 360) }
-        if width < 1024 { return 360 }
-        return 380
+        if width < 720 { return min(width * 0.9, 320) }
+        if width < 1024 { return 320 }
+        return 340
     }
     
     var settingsShouldScroll: Bool {
@@ -736,15 +736,19 @@ struct ResponsiveMetrics {
     }
     
     var settingsSectionSpacing: CGFloat {
-        isCompactWidth ? 16 : 20
+        isCompactWidth ? 10 : 12
     }
     
     var settingsControlSpacing: CGFloat {
-        isCompactWidth ? 12 : 16
+        isCompactWidth ? 8 : 10
     }
     
     var settingsEdgePadding: CGFloat {
-        isCompactWidth ? 16 : 20
+        isCompactWidth ? 14 : 16
+    }
+    
+    var settingsRowSpacing: CGFloat {
+        isCompactWidth ? 6 : 8
     }
     
 }
@@ -881,11 +885,9 @@ struct LyricsWidgetView: View {
                             .transition(
                                 .asymmetric(
                                     insertion: .move(edge: .top)
-                                        .combined(with: .opacity)
-                                        .combined(with: .scale(scale: 0.95)),
+                                        .combined(with: .opacity),
                                     removal: .move(edge: .top)
                                         .combined(with: .opacity)
-                                        .combined(with: .scale(scale: 0.95))
                                 )
                             )
                     }
@@ -903,12 +905,12 @@ struct LyricsWidgetView: View {
             .opacity(settings.windowOpacity)
         .onHover { hovering in
             isPointerInside = hovering
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
                 isHovering = hovering || showSettings
             }
         }
         .onChange(of: showSettings, initial: false) { _, newValue in
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
                 isHovering = newValue || isPointerInside
             }
         }
@@ -962,7 +964,7 @@ struct LyricsWidgetView: View {
                     systemImage: isMinimized ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                     size: metrics.headerButtonSize
                 ) {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
                         isMinimized.toggle()
                     }
                 }
@@ -981,7 +983,7 @@ struct LyricsWidgetView: View {
     
     private func settingsButton(metrics: ResponsiveMetrics) -> some View {
         Button(action: {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
                 showSettings.toggle()
             }
         }) {
@@ -1046,18 +1048,15 @@ struct LyricsWidgetView: View {
                         theme: theme,
                         metrics: metrics
                     )
+                    .id(item.index)
                     .transition(
                         .asymmetric(
                             insertion: lineInsertionTransition,
                             removal: lineRemovalTransition
                         )
                     )
-                    .animation(
-                        .spring(response: 0.6, dampingFraction: 0.82)
-                            .delay(Double(offset) * 0.05),
-                        value: item.index == currentLineIndex
-                    )
                 }
+                .animation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1), value: currentLineIndex)
                 Spacer(minLength: metrics.lyricsVerticalGutter)
             }
         }
@@ -1096,7 +1095,7 @@ struct LyricsWidgetView: View {
                             width: geometry.size.width * CGFloat(songDuration > 0 ? currentTime / songDuration : 0),
                             height: metrics.progressHeight
                         )
-                        .animation(.easeOut(duration: 0.2), value: currentTime)
+                        .animation(.interpolatingSpring(stiffness: 120, damping: 20), value: currentTime)
                 }
             }
             .frame(height: metrics.progressHeight)
@@ -1124,36 +1123,36 @@ struct LyricsWidgetView: View {
     @ViewBuilder
     private func settingsPopoverContent(metrics: ResponsiveMetrics) -> some View {
         let sectionSpacing = metrics.settingsSectionSpacing
-        let controlSpacing = metrics.settingsControlSpacing
-        let gridColumns = [GridItem(.adaptive(minimum: metrics.isCompactWidth ? 100 : 112), spacing: controlSpacing)]
-        let popoverWidth = max(320, min(metrics.settingsWidth, 400))
+        let rowSpacing = metrics.settingsRowSpacing
+        let popoverWidth = max(300, min(metrics.settingsWidth, 340))
         
         let content = VStack(alignment: .leading, spacing: sectionSpacing) {
-            HStack {
+            // Header
+            HStack(spacing: 8) {
                 Text("Settings")
-                    .font(uiFont(size: metrics.isCompactWidth ? 17 : 18, weight: .bold, design: .monospaced))
+                    .font(uiFont(size: 14, weight: .semibold, design: .monospaced))
                     .foregroundColor(theme.primaryText)
                 
                 Spacer()
                 
                 Button(action: {
-                    showSettings = false
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
+                        showSettings = false
+                    }
                 }) {
                     Image(systemName: "xmark")
-                        .font(uiFont(size: metrics.headerButtonSize))
+                        .font(uiFont(size: 11, weight: .medium))
                         .foregroundColor(theme.iconColor)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(PlainButtonStyle())
                 .onHover { _ in NSCursor.arrow.set() }
             }
+            .padding(.bottom, 2)
             
-            Divider().background(dividerColor)
-            
-            VStack(alignment: .leading, spacing: controlSpacing) {
-                Text("Theme")
-                    .font(uiFont(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundColor(theme.mutedText(0.7))
-                
+            // Theme Section
+            VStack(alignment: .leading, spacing: rowSpacing) {
                 Picker("Theme Mode", selection: $settings.themeMode) {
                     ForEach(ThemeMode.allCases) { mode in
                         Text(mode.displayName).tag(mode)
@@ -1161,140 +1160,104 @@ struct LyricsWidgetView: View {
                 }
                 .pickerStyle(SegmentedPickerStyle())
                 .labelsHidden()
-            }
-            
-            if settings.themeMode == .manual {
-                LazyVGrid(columns: gridColumns, spacing: controlSpacing) {
-                    ForEach(ThemePreset.allCases) { preset in
-                        ThemePresetButton(
-                            preset: preset,
-                            isSelected: preset == settings.manualTheme,
-                            highlightColor: theme.accent
-                        ) {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                settings.manualTheme = preset
+                .frame(height: 24)
+                
+                if settings.themeMode == .manual {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(ThemePreset.allCases) { preset in
+                                CompactThemeButton(
+                                    preset: preset,
+                                    isSelected: preset == settings.manualTheme,
+                                    highlightColor: theme.accent
+                                ) {
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85, blendDuration: 0.1)) {
+                                        settings.manualTheme = preset
+                                    }
+                                }
                             }
                         }
+                        .padding(.vertical, 2)
                     }
                 }
-            } else {
-                Text("Following macOS appearance")
-                    .font(uiFont(size: 12))
-                    .foregroundColor(theme.mutedText(0.55))
             }
             
-            Divider().background(dividerColor)
-            
-            VStack(alignment: .leading, spacing: controlSpacing) {
-                HStack {
-                    Text("Window Opacity")
-                        .font(uiFont(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundColor(theme.mutedText(0.75))
-                    Spacer()
-                    Text("\(Int(settings.windowOpacity * 100))%")
-                        .font(uiFont(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundColor(theme.mutedText(0.55))
+            // Appearance Controls
+            VStack(alignment: .leading, spacing: rowSpacing) {
+                SettingRow(
+                    label: "Opacity",
+                    value: "\(Int(settings.windowOpacity * 100))%",
+                    theme: theme
+                ) {
+                    Slider(value: $settings.windowOpacity, in: 0.3...1.0, step: 0.05)
+                        .accentColor(theme.accent)
+                        .frame(height: 4)
                 }
                 
-                Slider(value: $settings.windowOpacity, in: 0.3...1.0, step: 0.05)
-                    .accentColor(theme.accent)
-            }
-            
-            VStack(alignment: .leading, spacing: controlSpacing) {
-                HStack {
-                    Text("Corner Radius")
-                        .font(uiFont(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundColor(theme.mutedText(0.75))
-                    Spacer()
-                    Text("\(Int(settings.cornerRadius))px")
-                        .font(uiFont(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundColor(theme.mutedText(0.55))
+                SettingRow(
+                    label: "Corner Radius",
+                    value: "\(Int(settings.cornerRadius))px",
+                    theme: theme
+                ) {
+                    Slider(value: $settings.cornerRadius, in: 0...40, step: 2)
+                        .accentColor(theme.accent)
+                        .frame(height: 4)
                 }
                 
-                Slider(value: $settings.cornerRadius, in: 0...40, step: 2)
-                    .accentColor(theme.accent)
-            }
-            
-            Divider().background(dividerColor)
-            
-            VStack(alignment: .leading, spacing: controlSpacing) {
-                HStack {
-                    Text("Lyric Font Size")
-                        .font(uiFont(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundColor(theme.mutedText(0.75))
-                    Spacer()
-                    Text("\(Int(settings.fontScale * 100))%")
-                        .font(uiFont(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundColor(theme.mutedText(0.55))
+                SettingRow(
+                    label: "Font Size",
+                    value: "\(Int(settings.fontScale * 100))%",
+                    theme: theme
+                ) {
+                    Slider(value: $settings.fontScale, in: 0.8...1.4, step: 0.05)
+                        .accentColor(theme.accent)
+                        .frame(height: 4)
                 }
-                
-                Slider(value: $settings.fontScale, in: 0.8...1.4, step: 0.05)
-                    .accentColor(theme.accent)
-                
-                Text("In the silence of the night")
-                    .font(
-                        .system(
-                            size: 20 * settings.fontScale,
-                            weight: .semibold,
-                            design: .monospaced
-                        )
-                    )
-                    .foregroundColor(theme.primaryText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, metrics.isCompactWidth ? 8 : 10)
-                    .padding(.horizontal, 12)
-                    .background(theme.controlSurface.opacity(0.85))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             
-            Divider().background(dividerColor)
-            
-            VStack(alignment: .leading, spacing: controlSpacing) {
+            // Cache Section
+            VStack(alignment: .leading, spacing: rowSpacing) {
                 HStack {
-                    Text("Lyrics Cache")
-                        .font(uiFont(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundColor(theme.mutedText(0.75))
+                    Text("Cache")
+                        .font(uiFont(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(theme.mutedText(0.7))
                     Spacer()
                     Text(cacheSummary)
-                        .font(uiFont(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundColor(theme.mutedText(0.55))
+                        .font(uiFont(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(theme.mutedText(0.5))
                 }
                 
-                Toggle(isOn: $settings.cachingEnabled) {
+                HStack(spacing: 8) {
+                    Toggle("", isOn: $settings.cachingEnabled)
+                        .toggleStyle(SwitchToggleStyle(tint: theme.accent))
+                        .labelsHidden()
+                        .onChange(of: settings.cachingEnabled, initial: false) { _, _ in
+                            Task { await refreshCacheStats() }
+                        }
+                    
                     Text("Enable caching")
-                        .font(uiFont(size: 12, weight: .medium, design: .monospaced))
+                        .font(uiFont(size: 11, design: .monospaced))
                         .foregroundColor(theme.primaryText)
-                }
-                .toggleStyle(SwitchToggleStyle(tint: theme.accent))
-                .onChange(of: settings.cachingEnabled, initial: false) { _, _ in
-                    Task { await refreshCacheStats() }
-                }
-                
-                Button(action: {
-                    Task {
-                        await LyricsCache.shared.clear()
-                        await refreshCacheStats()
+                    
+                    Spacer()
+                    
+                    if hasCacheContent {
+                        Button(action: {
+                            Task {
+                                await LyricsCache.shared.clear()
+                                await refreshCacheStats()
+                            }
+                        }) {
+                            Image(systemName: "trash")
+                                .font(uiFont(size: 10, weight: .medium))
+                                .foregroundColor(theme.mutedText(0.6))
+                                .frame(width: 20, height: 20)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .onHover { _ in NSCursor.arrow.set() }
                     }
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "trash")
-                            .font(uiFont(size: 12))
-                        Text("Clear Cached Lyrics")
-                            .font(uiFont(size: 12, weight: .medium, design: .monospaced))
-                    }
-                    .foregroundColor(theme.primaryText)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(theme.controlSurface.opacity(0.9))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(borderColor.opacity(0.6), lineWidth: 1)
-                    )
                 }
-                .buttonStyle(PlainButtonStyle())
-                .disabled(!hasCacheContent)
-                .opacity(hasCacheContent ? 1.0 : 0.5)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1306,19 +1269,42 @@ struct LyricsWidgetView: View {
         }
         .frame(width: popoverWidth)
         .background(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: 12)
                 .fill(.ultraThinMaterial)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(theme.header.opacity(0.35))
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(theme.header.opacity(0.3))
                 )
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(borderColor.opacity(0.55), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(borderColor.opacity(0.4), lineWidth: 0.5)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: shadowColor.opacity(0.35), radius: 20, x: 0, y: 12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: shadowColor.opacity(0.3), radius: 16, x: 0, y: 8)
+    }
+    
+    // MARK: - Setting Row Component
+    
+    @ViewBuilder
+    private func SettingRow<Content: View>(
+        label: String,
+        value: String,
+        theme: ThemePalette,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label)
+                    .font(uiFont(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(theme.mutedText(0.7))
+                Spacer()
+                Text(value)
+                    .font(uiFont(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(theme.mutedText(0.5))
+            }
+            content()
+        }
     }
     
     
@@ -1373,26 +1359,24 @@ struct LyricsWidgetView: View {
     private var lineInsertionTransition: AnyTransition {
         .asymmetric(
             insertion: .opacity
-                .combined(with: .offset(y: 30))
-                .combined(with: .scale(scale: 0.92))
+                .combined(with: .offset(y: 20))
                 .combined(with: blurTransition),
-            removal: .identity
+            removal: .opacity
         )
     }
     
     private var lineRemovalTransition: AnyTransition {
         .asymmetric(
-            insertion: .identity,
+            insertion: .opacity,
             removal: .opacity
-                .combined(with: .offset(y: -30))
-                .combined(with: .scale(scale: 0.92))
+                .combined(with: .offset(y: -20))
                 .combined(with: blurTransition)
         )
     }
     
     private var blurTransition: AnyTransition {
         .modifier(
-            active: BlurTransitionModifier(radius: 8),
+            active: BlurTransitionModifier(radius: 6),
             identity: BlurTransitionModifier(radius: 0)
         )
     }
@@ -1419,9 +1403,13 @@ struct LyricsWidgetView: View {
     private func startTimer() {
         timer?.invalidate()
         
-        // Real playback monitoring - check every 300ms
-        timer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { _ in
+        // Real playback monitoring - check every 200ms for smoother updates
+        timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
             updateFromRealPlayback()
+        }
+        // Add timer to common run loop modes to prevent stuttering during scrolling/interaction
+        if let timer = timer {
+            RunLoop.current.add(timer, forMode: .common)
         }
     }
     
@@ -1443,8 +1431,10 @@ struct LyricsWidgetView: View {
             let nextTime = nextIndex.map { song.lyrics[$0].time } ?? Double.infinity
             return currentTime >= line.time && currentTime < nextTime
         }) {
-            withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) {
-                currentLineIndex = newIndex
+            if newIndex != currentLineIndex {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)) {
+                    currentLineIndex = newIndex
+                }
             }
         }
     }
@@ -1581,6 +1571,52 @@ struct ThemePresetButton: View {
     }
 }
 
+// MARK: - Compact Theme Button
+
+struct CompactThemeButton: View {
+    let preset: ThemePreset
+    let isSelected: Bool
+    let highlightColor: Color
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(
+                        LinearGradient(
+                            colors: [preset.palette.background, preset.palette.header],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 40, height: 32)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(isSelected ? highlightColor : preset.palette.border.opacity(0.6), lineWidth: isSelected ? 1.5 : 0.5)
+                    )
+                    .overlay(
+                        Group {
+                            if isSelected {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(highlightColor)
+                            }
+                        }
+                    )
+                
+                Text(preset.displayName)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundColor(preset.palette.primaryText.opacity(isSelected ? 0.9 : 0.6))
+                    .lineLimit(1)
+            }
+            .frame(width: 50)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { _ in NSCursor.arrow.set() }
+    }
+}
+
 // MARK: - Lyric Line View
 
 struct LyricLineView: View {
@@ -1616,14 +1652,19 @@ struct LyricLineView: View {
                 y: isCurrent ? 4 : 0
             )
             .animation(
-                .spring(response: 0.55, dampingFraction: 0.78)
-                    .speed(0.9),
+                .spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1),
                 value: isCurrent
             )
             .animation(
-                .easeInOut(duration: 0.4),
+                .spring(response: 0.45, dampingFraction: 0.9, blendDuration: 0.1),
                 value: isPast
             )
+            .transaction { transaction in
+                // Smooth font size transitions
+                if transaction.animation != nil {
+                    transaction.animation = .spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)
+                }
+            }
             .frame(maxWidth: .infinity)
     }
 }
@@ -1970,7 +2011,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func clampFrame(_ frame: NSRect, to visible: NSRect, windowSize: NSSize) -> NSRect {
-        var size = NSSize(width: min(windowSize.width, visible.width), height: min(windowSize.height, visible.height))
+        let size = NSSize(width: min(windowSize.width, visible.width), height: min(windowSize.height, visible.height))
         var origin = frame.origin
         
         origin.x = clamp(origin.x, min: visible.minX, max: visible.maxX - size.width)
