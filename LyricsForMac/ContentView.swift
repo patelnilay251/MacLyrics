@@ -882,6 +882,7 @@ struct LyricsWidgetView: View {
     @State private var showSettings = false
     @State private var showArtworkBackdrop = false
     @State private var dominantColor: Color? = nil
+    @State private var isPinned = false
     @StateObject private var settings = AppSettings()
     @Environment(\.colorScheme) private var colorScheme
     
@@ -946,8 +947,8 @@ struct LyricsWidgetView: View {
                     
                     lyricsView(metrics: metrics)
                     
-                    // Progress bar appears on hover
-                    if isHovering {
+                    // Progress bar appears on hover or when pinned
+                    if isHovering || isPinned {
                         progressBarView(metrics: metrics)
                             .padding(.bottom, metrics.progressBottomPadding)
                             .transition(
@@ -968,7 +969,7 @@ struct LyricsWidgetView: View {
                 
                 // Header (on top)
                 VStack {
-                    if isHovering {
+                    if isHovering || isPinned {
                         headerView(metrics: metrics)
                             .zIndex(2)
                             .transition(
@@ -1006,13 +1007,17 @@ struct LyricsWidgetView: View {
             }
         .onHover { hovering in
             isPointerInside = hovering
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
-                isHovering = hovering || showSettings
+            if !isPinned {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
+                    isHovering = hovering || showSettings
+                }
             }
         }
         .onChange(of: showSettings, initial: false) { _, newValue in
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
-                isHovering = newValue || isPointerInside
+            if !isPinned {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
+                    isHovering = newValue || isPointerInside
+                }
             }
         }
         .onAppear {
@@ -1099,11 +1104,18 @@ struct LyricsWidgetView: View {
                 settingsButton(metrics: metrics)
                 
                 controlButton(
-                    systemImage: isMinimized ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                    systemImage: isPinned ? "pin.fill" : "pin",
                     size: metrics.headerButtonSize
                 ) {
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
-                        isMinimized.toggle()
+                        isPinned.toggle()
+                        if isPinned {
+                            // When pinning, ensure bars are visible
+                            isHovering = true
+                        } else {
+                            // When unpinning, restore hover state
+                            isHovering = isPointerInside || showSettings
+                        }
                     }
                 }
                 
@@ -1230,7 +1242,7 @@ struct LyricsWidgetView: View {
                         .frame(height: metrics.progressHeight)
                     
                     Rectangle()
-                        .fill(theme.progressFill)
+                        .fill(theme.primaryText.opacity(0.7))
                         .frame(
                             width: geometry.size.width * CGFloat(songDuration > 0 ? currentTime / songDuration : 0),
                             height: metrics.progressHeight
