@@ -880,6 +880,8 @@ struct LyricsWidgetView: View {
     @State private var isHovering = false
     @State private var isPointerInside = false
     @State private var showSettings = false
+    @State private var showArtworkBackdrop = false
+    @State private var dominantColor: Color? = nil
     @StateObject private var settings = AppSettings()
     @Environment(\.colorScheme) private var colorScheme
     
@@ -930,6 +932,14 @@ struct LyricsWidgetView: View {
             )
             
             ZStack {
+                // Artwork backdrop (behind everything)
+                if showArtworkBackdrop, let artwork = song.artwork {
+                    artworkBackdropView(artwork: artwork, metrics: metrics)
+                        .zIndex(0)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                }
+                
+                // Main content
                 VStack(spacing: 0) {
                     Color.clear
                         .frame(height: metrics.headerReservedHeight)
@@ -939,10 +949,13 @@ struct LyricsWidgetView: View {
                     progressBarView(metrics: metrics)
                         .padding(.bottom, metrics.progressBottomPadding)
                 }
+                .zIndex(1)
                 
+                // Header (on top)
                 VStack {
                     if isHovering {
                         headerView(metrics: metrics)
+                            .zIndex(2)
                             .transition(
                                 .asymmetric(
                                     insertion: .move(edge: .top)
@@ -954,9 +967,10 @@ struct LyricsWidgetView: View {
                     }
                     Spacer()
                 }
+                .zIndex(2)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(theme.background)
+            .background(showArtworkBackdrop ? Color.clear : theme.background)
             .clipShape(RoundedRectangle(cornerRadius: settings.cornerRadius))
             .overlay(
                 RoundedRectangle(cornerRadius: settings.cornerRadius)
@@ -964,6 +978,17 @@ struct LyricsWidgetView: View {
             )
             .shadow(color: shadowColor, radius: 20, x: 0, y: 10)
             .opacity(settings.windowOpacity)
+            .onChange(of: song.artwork, initial: false) { _, newArtwork in
+                if let artwork = newArtwork {
+                    extractDominantColor(from: artwork)
+                    // Show backdrop by default when artwork is available
+                    if !showArtworkBackdrop {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)) {
+                            showArtworkBackdrop = true
+                        }
+                    }
+                }
+            }
         .onHover { hovering in
             isPointerInside = hovering
             withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
@@ -978,6 +1003,12 @@ struct LyricsWidgetView: View {
         .onAppear {
             startTimer()
             Task { await refreshCacheStats() }
+            // Show backdrop by default if artwork is available
+            if song.artwork != nil {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)) {
+                    showArtworkBackdrop = true
+                }
+            }
         }
         .onDisappear {
             stopTimer()
@@ -994,15 +1025,29 @@ struct LyricsWidgetView: View {
             // Artwork or placeholder
             Group {
                 if let artwork = song.artwork {
-                    Image(nsImage: artwork)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: buttonSide, height: buttonSide)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(theme.border.opacity(0.2), lineWidth: 0.5)
-                        )
+                    Button(action: {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)) {
+                            showArtworkBackdrop.toggle()
+                        }
+                    }) {
+                        Image(nsImage: artwork)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: buttonSide, height: buttonSide)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(theme.border.opacity(0.2), lineWidth: 0.5)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.black.opacity(0.1))
+                                    .opacity(isHovering ? 1 : 0)
+                            )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .focusable(false)
+                    .onHover { _ in NSCursor.pointingHand.push() }
                 } else {
                     Image(systemName: "music.note")
                         .font(uiFont(size: metrics.headerIconSize))
@@ -1071,6 +1116,7 @@ struct LyricsWidgetView: View {
                 .frame(width: metrics.headerButtonSize + 12, height: metrics.headerButtonSize + 12)
         }
         .buttonStyle(PlainButtonStyle())
+        .focusable(false)
         .onHover { _ in NSCursor.arrow.set() }
         .popover(isPresented: $showSettings, arrowEdge: .top) {
             settingsPopoverContent(metrics: metrics)
@@ -1085,6 +1131,7 @@ struct LyricsWidgetView: View {
                 .frame(width: size + 12, height: size + 12)
         }
         .buttonStyle(PlainButtonStyle())
+        .focusable(false)
         .onHover { _ in NSCursor.arrow.set() }
     }
     
@@ -1225,6 +1272,7 @@ struct LyricsWidgetView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PlainButtonStyle())
+                .focusable(false)
                 .onHover { _ in NSCursor.arrow.set() }
             }
             .padding(.bottom, 2)
@@ -1333,6 +1381,7 @@ struct LyricsWidgetView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .focusable(false)
                         .onHover { _ in NSCursor.arrow.set() }
                     }
                 }
@@ -1523,6 +1572,143 @@ struct LyricsWidgetView: View {
         return String(format: "%d:%02d", minutes, seconds)
     }
     
+    // MARK: - Artwork Backdrop
+    
+    @ViewBuilder
+    private func artworkBackdropView(artwork: NSImage, metrics: ResponsiveMetrics) -> some View {
+        ZStack {
+            // Blurred artwork background
+            Image(nsImage: artwork)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .blur(radius: 40)
+                .scaleEffect(1.1) // Slight scale to avoid edges
+                .clipped()
+            
+            // Color overlay
+            if let dominantColor = dominantColor {
+                dominantColor
+                    .opacity(0.6)
+                    .blendMode(.overlay)
+            } else {
+                Color.black.opacity(0.3)
+            }
+            
+            // Gradient overlay for better text readability
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.2),
+                    Color.clear,
+                    Color.clear,
+                    Color.black.opacity(0.2)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            extractDominantColor(from: artwork)
+        }
+    }
+    
+    private func extractDominantColor(from image: NSImage) {
+        Task {
+            guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                return
+            }
+            
+            // Resize image for faster processing
+            let width = min(100, cgImage.width)
+            let height = min(100, cgImage.height)
+            
+            guard let resizedCGImage = resizeCGImage(cgImage, width: width, height: height) else {
+                return
+            }
+            
+            // Extract pixel data
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let bytesPerPixel = 4
+            let bytesPerRow = bytesPerPixel * width
+            let bitsPerComponent = 8
+            
+            var pixelData = [UInt8](repeating: 0, count: width * height * bytesPerPixel)
+            
+            guard let context = CGContext(
+                data: &pixelData,
+                width: width,
+                height: height,
+                bitsPerComponent: bitsPerComponent,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+            ) else {
+                return
+            }
+            
+            context.draw(resizedCGImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            
+            // Calculate average color
+            var r: CGFloat = 0
+            var g: CGFloat = 0
+            var b: CGFloat = 0
+            var count: CGFloat = 0
+            
+            for i in stride(from: 0, to: pixelData.count, by: bytesPerPixel) {
+                let red = CGFloat(pixelData[i]) / 255.0
+                let green = CGFloat(pixelData[i + 1]) / 255.0
+                let blue = CGFloat(pixelData[i + 2]) / 255.0
+                
+                // Skip very dark or very light pixels
+                let brightness = (red + green + blue) / 3.0
+                if brightness > 0.1 && brightness < 0.9 {
+                    r += red
+                    g += green
+                    b += blue
+                    count += 1
+                }
+            }
+            
+            guard count > 0 else { return }
+            
+            r /= count
+            g /= count
+            b /= count
+            
+            // Enhance saturation slightly
+            let saturationBoost: CGFloat = 1.2
+            let maxComponent = max(r, g, b)
+            if maxComponent > 0 {
+                r = min(1.0, r * saturationBoost)
+                g = min(1.0, g * saturationBoost)
+                b = min(1.0, b * saturationBoost)
+            }
+            
+            await MainActor.run {
+                dominantColor = Color(red: Double(r), green: Double(g), blue: Double(b))
+            }
+        }
+    }
+    
+    private func resizeCGImage(_ image: CGImage, width: Int, height: Int) -> CGImage? {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        )
+        
+        context?.interpolationQuality = .low
+        context?.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        
+        return context?.makeImage()
+    }
+    
     // MARK: - Artwork Loading
     
     private func loadArtwork(from playback: PlaybackInfo) async -> NSImage? {
@@ -1706,6 +1892,7 @@ struct ThemePresetButton: View {
             )
         }
         .buttonStyle(PlainButtonStyle())
+        .focusable(false)
         .onHover { _ in NSCursor.arrow.set() }
     }
 }
@@ -1752,6 +1939,7 @@ struct CompactThemeButton: View {
             .frame(width: 50)
         }
         .buttonStyle(PlainButtonStyle())
+        .focusable(false)
         .onHover { _ in NSCursor.arrow.set() }
     }
 }
