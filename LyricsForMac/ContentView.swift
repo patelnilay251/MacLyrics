@@ -48,6 +48,14 @@ struct Song {
     let title: String
     let artist: String
     let lyrics: [LyricLine]
+    let artwork: NSImage?
+    
+    init(title: String, artist: String, lyrics: [LyricLine], artwork: NSImage? = nil) {
+        self.title = title
+        self.artist = artist
+        self.lyrics = lyrics
+        self.artwork = artwork
+    }
 }
 
 struct PlaybackInfo {
@@ -56,6 +64,8 @@ struct PlaybackInfo {
     let position: Double
     let duration: Double
     let isPlaying: Bool
+    let artworkURL: String?  // For Spotify
+    let artworkData: String? // For Apple Music (base64 encoded)
 }
 
 // MARK: - LRCLIB API Response
@@ -390,7 +400,12 @@ func getSpotifyPlayback() -> PlaybackInfo? {
                 set playerPos to player position as integer
                 set trackDur to (duration of current track) / 1000 as integer
                 set isPlaying to (player state is playing)
-                return trackName & "||||" & artistName & "||||" & playerPos & "||||" & trackDur & "||||" & isPlaying
+                try
+                    set artworkURL to artwork url of current track
+                on error
+                    set artworkURL to ""
+                end try
+                return trackName & "||||" & artistName & "||||" & playerPos & "||||" & trackDur & "||||" & isPlaying & "||||" & artworkURL
             end if
         end if
     end tell
@@ -401,12 +416,16 @@ func getSpotifyPlayback() -> PlaybackInfo? {
     let parts = result.components(separatedBy: "||||")
     guard parts.count >= 5 else { return nil }
     
+    let artworkURL = parts.count >= 6 && !parts[5].isEmpty ? parts[5] : nil
+    
     return PlaybackInfo(
         title: parts[0],
         artist: parts[1],
         position: Double(parts[2]) ?? 0,
         duration: Double(parts[3]) ?? 0,
-        isPlaying: parts[4] == "true"
+        isPlaying: parts[4] == "true",
+        artworkURL: artworkURL,
+        artworkData: nil
     )
 }
 
@@ -420,7 +439,19 @@ func getAppleMusicPlayback() -> PlaybackInfo? {
                 set playerPos to player position as integer
                 set trackDur to duration of current track as integer
                 set isPlaying to (player state is playing)
-                return trackName & "||||" & artistName & "||||" & playerPos & "||||" & trackDur & "||||" & isPlaying
+                set artworkData to ""
+                try
+                    if exists artwork 1 of current track then
+                        set artworkPath to (path to temporary items folder as string) & "lyrics_artwork_" & (random number from 1000 to 9999) & ".jpg"
+                        set artworkFile to open for access file artworkPath with write permission
+                        write (data of artwork 1 of current track) to artworkFile
+                        close access artworkFile
+                        set artworkData to artworkPath
+                    end if
+                on error
+                    set artworkData to ""
+                end try
+                return trackName & "||||" & artistName & "||||" & playerPos & "||||" & trackDur & "||||" & isPlaying & "||||" & artworkData
             end if
         end if
     end tell
@@ -431,12 +462,16 @@ func getAppleMusicPlayback() -> PlaybackInfo? {
     let parts = result.components(separatedBy: "||||")
     guard parts.count >= 5 else { return nil }
     
+    let artworkData = parts.count >= 6 && !parts[5].isEmpty ? parts[5] : nil
+    
     return PlaybackInfo(
         title: parts[0],
         artist: parts[1],
         position: Double(parts[2]) ?? 0,
         duration: Double(parts[3]) ?? 0,
-        isPlaying: parts[4] == "true"
+        isPlaying: parts[4] == "true",
+        artworkURL: nil,
+        artworkData: artworkData
     )
 }
 
@@ -485,6 +520,32 @@ func previousTrack() {
 }
 
 // MARK: - Sample Data (Fallback)
+
+// MARK: - Artwork Cache
+
+class ArtworkCache {
+    static let shared = ArtworkCache()
+    private let cache = NSCache<NSString, NSImage>()
+    
+    private init() {
+        cache.countLimit = 50
+        cache.totalCostLimit = 50 * 1024 * 1024 // 50MB
+    }
+    
+    func cacheKey(title: String, artist: String) -> String {
+        return "\(title)|\(artist)"
+    }
+    
+    func get(title: String, artist: String) -> NSImage? {
+        let key = cacheKey(title: title, artist: artist)
+        return cache.object(forKey: key as NSString)
+    }
+    
+    func set(_ image: NSImage, title: String, artist: String) {
+        let key = cacheKey(title: title, artist: artist)
+        cache.setObject(image, forKey: key as NSString)
+    }
+}
 
 let sampleSong = Song(
     title: "Ethereal Dreams",
@@ -930,10 +991,27 @@ struct LyricsWidgetView: View {
     private func headerView(metrics: ResponsiveMetrics) -> some View {
         let buttonSide: CGFloat = metrics.isCompactWidth ? 30 : 34
         HStack(spacing: metrics.isCompactWidth ? 10 : 14) {
-            Image(systemName: "music.note")
-                .font(uiFont(size: metrics.headerIconSize))
-                .foregroundColor(theme.iconColor)
-                .frame(width: buttonSide, height: buttonSide)
+            // Artwork or placeholder
+            Group {
+                if let artwork = song.artwork {
+                    Image(nsImage: artwork)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: buttonSide, height: buttonSide)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(theme.border.opacity(0.2), lineWidth: 0.5)
+                        )
+                } else {
+                    Image(systemName: "music.note")
+                        .font(uiFont(size: metrics.headerIconSize))
+                        .foregroundColor(theme.iconColor)
+                        .frame(width: buttonSide, height: buttonSide)
+                        .background(theme.controlSurface.opacity(0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+            }
             
             VStack(alignment: .leading, spacing: metrics.isCompactWidth ? 1 : 2) {
                 if noPlaybackDetected {
@@ -1445,6 +1523,67 @@ struct LyricsWidgetView: View {
         return String(format: "%d:%02d", minutes, seconds)
     }
     
+    // MARK: - Artwork Loading
+    
+    private func loadArtwork(from playback: PlaybackInfo) async -> NSImage? {
+        // Check cache first
+        if let cached = ArtworkCache.shared.get(title: playback.title, artist: playback.artist) {
+            return cached
+        }
+        
+        // Try Apple Music artwork data
+        if let artworkData = playback.artworkData, !artworkData.isEmpty {
+            if let image = convertAppleMusicArtwork(artworkData) {
+                ArtworkCache.shared.set(image, title: playback.title, artist: playback.artist)
+                return image
+            }
+        }
+        
+        // Try Spotify artwork URL
+        if let artworkURL = playback.artworkURL, !artworkURL.isEmpty,
+           let url = URL(string: artworkURL) {
+            if let image = await downloadArtwork(from: url) {
+                ArtworkCache.shared.set(image, title: playback.title, artist: playback.artist)
+                return image
+            }
+        }
+        
+        return nil
+    }
+    
+    private func convertAppleMusicArtwork(_ filePath: String) -> NSImage? {
+        // AppleScript saves artwork to a temporary file and returns the path
+        // Clean up the path (remove "Macintosh HD:" prefix if present, handle file://)
+        var cleanPath = filePath
+            .replacingOccurrences(of: "Macintosh HD:", with: "")
+            .replacingOccurrences(of: "file://", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Remove trailing colon if present
+        if cleanPath.hasSuffix(":") {
+            cleanPath = String(cleanPath.dropLast())
+        }
+        
+        // Try to load the image from the file path
+        if let image = NSImage(contentsOfFile: cleanPath) {
+            // Clean up the temporary file after loading
+            try? FileManager.default.removeItem(atPath: cleanPath)
+            return image
+        }
+        
+        return nil
+    }
+    
+    private func downloadArtwork(from url: URL) async -> NSImage? {
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            return NSImage(data: data)
+        } catch {
+            print("❌ Failed to download artwork: \(error.localizedDescription)")
+            return nil
+        }
+    }
+    
     // MARK: - Real Playback Integration
     
     private func updateFromRealPlayback() {
@@ -1475,38 +1614,38 @@ struct LyricsWidgetView: View {
             isLoadingLyrics = true
             lyricsError = nil
             
-            // Update song with empty lyrics while fetching
-            song = Song(
-                title: playback.title,
-                artist: playback.artist,
-                lyrics: []
-            )
-            
-            // Fetch lyrics asynchronously
+            // Load artwork asynchronously
             Task {
-                if let fetchedLyrics = await LyricsService.fetchLyrics(
+                let artwork = await loadArtwork(from: playback)
+                
+                // Fetch lyrics asynchronously
+                let fetchedLyrics = await LyricsService.fetchLyrics(
                     title: playback.title,
                     artist: playback.artist,
                     duration: playback.duration
-                ) {
-                    // Successfully fetched lyrics
-                    await MainActor.run {
-                        if fetchedLyrics.isEmpty {
+                )
+                
+                await MainActor.run {
+                    if let lyrics = fetchedLyrics {
+                        if lyrics.isEmpty {
                             lyricsError = "Instrumental track"
                         }
                         song = Song(
                             title: playback.title,
                             artist: playback.artist,
-                            lyrics: fetchedLyrics
+                            lyrics: lyrics,
+                            artwork: artwork
                         )
-                        isLoadingLyrics = false
-                    }
-                } else {
-                    // Failed to fetch lyrics
-                    await MainActor.run {
+                    } else {
                         lyricsError = "Lyrics not found"
-                        isLoadingLyrics = false
+                        song = Song(
+                            title: playback.title,
+                            artist: playback.artist,
+                            lyrics: [],
+                            artwork: artwork
+                        )
                     }
+                    isLoadingLyrics = false
                 }
                 await refreshCacheStats()
             }
