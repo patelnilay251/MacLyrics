@@ -946,8 +946,23 @@ struct LyricsWidgetView: View {
                     
                     lyricsView(metrics: metrics)
                     
-                    progressBarView(metrics: metrics)
-                        .padding(.bottom, metrics.progressBottomPadding)
+                    // Progress bar appears on hover
+                    if isHovering {
+                        progressBarView(metrics: metrics)
+                            .padding(.bottom, metrics.progressBottomPadding)
+                            .transition(
+                                .asymmetric(
+                                    insertion: .move(edge: .bottom)
+                                        .combined(with: .opacity),
+                                    removal: .move(edge: .bottom)
+                                        .combined(with: .opacity)
+                                )
+                            )
+                    } else {
+                        // Invisible spacer to maintain layout
+                        Color.clear
+                            .frame(height: metrics.progressHeight + metrics.progressBottomPadding + 16)
+                    }
                 }
                 .zIndex(1)
                 
