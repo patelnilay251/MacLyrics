@@ -693,77 +693,138 @@ struct ResponsiveMetrics {
     var width: CGFloat { size.width }
     var height: CGFloat { size.height }
     
+    // Enhanced breakpoints with smooth transitions
+    var isVeryCompactWidth: Bool { width < 400 }
     var isCompactWidth: Bool { width < 520 }
+    var isMediumWidth: Bool { width >= 520 && width <= 720 }
     var isWideWidth: Bool { width > 960 }
     var isShortHeight: Bool { height < 560 }
+    var isTallHeight: Bool { height > 700 }
+    
+    // Smooth interpolation helper
+    private func interpolate(compact: CGFloat, medium: CGFloat, wide: CGFloat) -> CGFloat {
+        if isVeryCompactWidth {
+            return compact * 0.9
+        } else if isCompactWidth {
+            return compact
+        } else if isMediumWidth {
+            let ratio = (width - 520) / (720 - 520)
+            return compact + (medium - compact) * ratio
+        } else if isWideWidth {
+            return wide
+        } else {
+            let ratio = min(1.0, (width - 720) / (960 - 720))
+            return medium + (wide - medium) * ratio
+        }
+    }
+    
+    // Constrained font scale per breakpoint
+    var effectiveFontScale: Double {
+        let baseScale = fontScale
+        if isVeryCompactWidth {
+            return max(0.85, min(1.0, baseScale))
+        } else if isCompactWidth {
+            return max(0.85, min(1.1, baseScale))
+        } else if isWideWidth {
+            return max(0.9, min(1.4, baseScale))
+        } else {
+            return max(0.9, min(1.3, baseScale))
+        }
+    }
     
     var headerReservedHeight: CGFloat {
         if isMinimized { return 48 }
-        return isCompactWidth ? 56 : 64
+        // Temporarily reverted - progress bar commented out for Figma design work
+        return interpolate(compact: 56, medium: 60, wide: 64)
     }
     
     var headerHorizontalPadding: CGFloat {
-        isCompactWidth ? 16 : 20
+        // Percentage-based with minimum
+        max(12, width * 0.033)
     }
     
     var headerVerticalPadding: CGFloat {
-        isCompactWidth ? 12 : 16
+        interpolate(compact: 12, medium: 14, wide: 16)
     }
     
     var headerIconSize: CGFloat {
-        isCompactWidth ? 16 : 20
+        interpolate(compact: 16, medium: 18, wide: 20)
     }
     
     var headerButtonSize: CGFloat {
-        isCompactWidth ? 14 : 16
+        interpolate(compact: 14, medium: 15, wide: 16)
     }
     
     var headerTitleSize: CGFloat {
-        isCompactWidth ? 13 : 15
+        interpolate(compact: 13, medium: 14, wide: 15)
     }
     
     var headerSubtitleSize: CGFloat {
-        isCompactWidth ? 11 : 12
+        interpolate(compact: 11, medium: 11.5, wide: 12)
     }
     
     var contentHorizontalPadding: CGFloat {
         if isMinimized { return 18 }
-        if isCompactWidth { return 24 }
-        if isWideWidth { return 56 }
-        return 40
+        // Percentage-based with breakpoint adjustments
+        let basePadding = width * 0.04
+        if isVeryCompactWidth {
+            return max(20, basePadding)
+        } else if isCompactWidth {
+            return max(24, basePadding)
+        } else if isWideWidth {
+            return min(56, basePadding * 1.4)
+        } else {
+            return max(32, min(48, basePadding))
+        }
     }
     
     var lyricsVerticalSpacing: CGFloat {
-        isCompactWidth ? 8 : 12
+        // Scale based on available height
+        let baseSpacing = interpolate(compact: 8, medium: 10, wide: 12)
+        if isTallHeight {
+            return baseSpacing * 1.2
+        } else if isShortHeight {
+            return baseSpacing * 0.9
+        }
+        return baseSpacing
     }
     
     var lyricsVerticalGutter: CGFloat {
-        isShortHeight ? 12 : 20
+        // Dynamic based on content height vs available space
+        let baseGutter: CGFloat = isShortHeight ? 12 : 20
+        if isTallHeight && !isShortHeight {
+            return min(30, baseGutter * 1.3)
+        }
+        return baseGutter
     }
     
     var lyricCurrentSize: CGFloat {
         let base: CGFloat
         if isMinimized { base = 26 }
+        else if isVeryCompactWidth { base = 26 }
         else if isCompactWidth { base = 28 }
         else if isWideWidth { base = 36 }
         else { base = 32 }
-        return base * fontScale
+        return base * effectiveFontScale
     }
     
     var lyricSecondarySize: CGFloat {
         let base: CGFloat
         if isMinimized { base = 16 }
+        else if isVeryCompactWidth { base = 16 }
         else if isCompactWidth { base = 18 }
         else { base = 20 }
-        return base * fontScale
+        return base * effectiveFontScale
     }
     
     var lyricVerticalPadding: CGFloat {
-        isMinimized ? 10 : (isCompactWidth ? 12 : 16)
+        if isMinimized { return 10 }
+        return interpolate(compact: 12, medium: 14, wide: 16)
     }
     
     var lyricHorizontalPadding: CGFloat {
-        isCompactWidth ? 16 : 24
+        // Percentage-based
+        max(12, width * 0.027)
     }
     
     var lyricCurrentScale: CGFloat {
@@ -775,21 +836,30 @@ struct ResponsiveMetrics {
     }
     
     var lyricBlurRadius: CGFloat {
-        isCompactWidth ? 2.5 : 3.5
+        interpolate(compact: 2.5, medium: 3.0, wide: 3.5)
     }
     
     var progressHeight: CGFloat {
-        isCompactWidth ? 3 : 4
+        interpolate(compact: 3, medium: 3.5, wide: 4)
     }
     
     var progressBottomPadding: CGFloat {
-        isShortHeight ? 12 : 18
+        if isShortHeight { return 12 }
+        if isTallHeight { return 20 }
+        return 18
     }
     
     var settingsWidth: CGFloat {
-        if width < 720 { return min(width * 0.9, 320) }
-        if width < 1024 { return 320 }
-        return 340
+        // Relative to window width with constraints
+        let relativeWidth = min(width * 0.4, 340)
+        if width < 400 {
+            return min(width * 0.9, 300)
+        } else if width < 720 {
+            return min(width * 0.9, 320)
+        } else if width < 1024 {
+            return 320
+        }
+        return max(320, relativeWidth)
     }
     
     var settingsShouldScroll: Bool {
@@ -797,19 +867,19 @@ struct ResponsiveMetrics {
     }
     
     var settingsSectionSpacing: CGFloat {
-        isCompactWidth ? 10 : 12
+        interpolate(compact: 10, medium: 11, wide: 12)
     }
     
     var settingsControlSpacing: CGFloat {
-        isCompactWidth ? 8 : 10
+        interpolate(compact: 8, medium: 9, wide: 10)
     }
     
     var settingsEdgePadding: CGFloat {
-        isCompactWidth ? 14 : 16
+        interpolate(compact: 14, medium: 15, wide: 16)
     }
     
     var settingsRowSpacing: CGFloat {
-        isCompactWidth ? 6 : 8
+        interpolate(compact: 6, medium: 7, wide: 8)
     }
     
 }
@@ -883,6 +953,8 @@ struct LyricsWidgetView: View {
     @State private var showArtworkBackdrop = false
     @State private var dominantColor: Color? = nil
     @State private var isPinned = false
+    @State private var isResizing = false
+    @State private var previousSize: CGSize = .zero
     @StateObject private var settings = AppSettings()
     @Environment(\.colorScheme) private var colorScheme
     
@@ -932,6 +1004,9 @@ struct LyricsWidgetView: View {
                 isMinimized: isMinimized
             )
             
+            // Detect resize
+            let currentSize = proxy.size
+            
             ZStack {
                 // Artwork backdrop (behind everything)
                 if showArtworkBackdrop, let artwork = song.artwork {
@@ -945,76 +1020,81 @@ struct LyricsWidgetView: View {
                     Color.clear
                         .frame(height: metrics.headerReservedHeight)
                     
-                    lyricsView(metrics: metrics)
-                    
-                    // Progress bar appears on hover or when pinned
-                    if isHovering || isPinned {
-                        progressBarView(metrics: metrics)
-                            .padding(.bottom, metrics.progressBottomPadding)
-                            .transition(
-                                .asymmetric(
-                                    insertion: .move(edge: .bottom)
-                                        .combined(with: .opacity),
-                                    removal: .move(edge: .bottom)
-                                        .combined(with: .opacity)
-                                )
-                            )
-                    } else {
-                        // Invisible spacer to maintain layout
-                        Color.clear
-                            .frame(height: metrics.progressHeight + metrics.progressBottomPadding + 16)
-                    }
+                    lyricsView(metrics: metrics, isResizing: isResizing)
                 }
                 .zIndex(1)
                 
-                // Header (on top)
-                VStack {
-                    if isHovering || isPinned {
-                        headerView(metrics: metrics)
-                            .zIndex(2)
-                            .transition(
-                                .asymmetric(
-                                    insertion: .move(edge: .top)
-                                        .combined(with: .opacity),
-                                    removal: .move(edge: .top)
-                                        .combined(with: .opacity)
-                                )
-                            )
-                    }
+                // Header (on top) - constrained to stay within bounds
+                VStack(spacing: 0) {
+                    headerView(metrics: metrics, isResizing: isResizing)
+                        .opacity(isHovering || isPinned ? 1.0 : 0.0)
+                        .offset(y: isHovering || isPinned ? 0 : -20)
+                        .allowsHitTesting(isHovering || isPinned) // Don't block hover when hidden
+                        .animation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1), value: isHovering)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1), value: isPinned)
+                        .zIndex(2)
                     Spacer()
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .zIndex(2)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(showArtworkBackdrop ? Color.clear : theme.background)
-            .clipShape(RoundedRectangle(cornerRadius: settings.cornerRadius))
-            .overlay(
+            .contentShape(Rectangle()) // Ensure entire ZStack area is hoverable
+            // Fixed border rendering: single background modifier with rounded rectangle + stroke
+            .background(
                 RoundedRectangle(cornerRadius: settings.cornerRadius)
-                    .stroke(borderColor, lineWidth: 1)
+                    .fill(showArtworkBackdrop ? Color.clear : theme.background)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: settings.cornerRadius)
+                            .stroke(borderColor, lineWidth: 0.5)
+                    )
             )
-            .shadow(color: shadowColor, radius: 20, x: 0, y: 10)
+            // Clip to rounded corners to prevent sharp edges during resize
+            .clipShape(RoundedRectangle(cornerRadius: settings.cornerRadius))
+            // Optimized shadow: reduced radius during resize, use layer effect if available
+            .shadow(
+                color: shadowColor,
+                radius: isResizing ? 12 : 18,
+                x: 0,
+                y: isResizing ? 6 : 10
+            )
             .opacity(settings.windowOpacity)
+            .onHover { hovering in
+                isPointerInside = hovering
+                if isPinned {
+                    // When pinned, always show
+                    isHovering = true
+                } else if !isResizing {
+                    // Update hover state with animation
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
+                        isHovering = hovering || showSettings
+                    }
+                }
+            }
+            .onChange(of: currentSize) { oldSize, newSize in
+                if oldSize != .zero && oldSize != newSize {
+                    isResizing = true
+                    // Reset resize state after a short delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        isResizing = false
+                    }
+                }
+                previousSize = newSize
+            }
             .onChange(of: song.artwork, initial: false) { _, newArtwork in
                 if let artwork = newArtwork {
                     extractDominantColor(from: artwork)
                     // Show backdrop by default when artwork is available
                     if !showArtworkBackdrop {
-                        withAnimation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)) {
+                        let animation = isResizing ? nil : Animation.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)
+                        withAnimation(animation) {
                             showArtworkBackdrop = true
                         }
                     }
                 }
             }
-        .onHover { hovering in
-            isPointerInside = hovering
-            if !isPinned {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
-                    isHovering = hovering || showSettings
-                }
-            }
-        }
         .onChange(of: showSettings, initial: false) { _, newValue in
-            if !isPinned {
+            if !isPinned && !isResizing {
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
                     isHovering = newValue || isPointerInside
                 }
@@ -1039,101 +1119,168 @@ struct LyricsWidgetView: View {
     // MARK: - Header View
     
     @ViewBuilder
-    private func headerView(metrics: ResponsiveMetrics) -> some View {
+    private func headerView(metrics: ResponsiveMetrics, isResizing: Bool) -> some View {
         let buttonSide: CGFloat = metrics.isCompactWidth ? 30 : 34
-        HStack(spacing: metrics.isCompactWidth ? 10 : 14) {
-            // Artwork or placeholder
-            Group {
-                if let artwork = song.artwork {
-                    Button(action: {
-                        withAnimation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)) {
-                            showArtworkBackdrop.toggle()
+        VStack(spacing: 0) {
+            // Top row: Artwork, Title/Artist, Controls
+            HStack(spacing: metrics.isCompactWidth ? 10 : 14) {
+                // Artwork or placeholder
+                Group {
+                    if let artwork = song.artwork {
+                        Button(action: {
+                            let animation = isResizing ? nil : Animation.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)
+                            withAnimation(animation) {
+                                showArtworkBackdrop.toggle()
+                            }
+                        }) {
+                            Image(nsImage: artwork)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: buttonSide, height: buttonSide)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(theme.border.opacity(0.2), lineWidth: 0.5)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(Color.black.opacity(0.1))
+                                        .opacity(isHovering ? 1 : 0)
+                                )
                         }
-                    }) {
-                        Image(nsImage: artwork)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
+                        .buttonStyle(PlainButtonStyle())
+                        .focusable(false)
+                        .onHover { _ in NSCursor.pointingHand.push() }
+                    } else {
+                        Image(systemName: "music.note")
+                            .font(uiFont(size: metrics.headerIconSize))
+                            .foregroundColor(theme.iconColor)
                             .frame(width: buttonSide, height: buttonSide)
+                            .background(theme.controlSurface.opacity(0.5))
                             .clipShape(RoundedRectangle(cornerRadius: 6))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(theme.border.opacity(0.2), lineWidth: 0.5)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(Color.black.opacity(0.1))
-                                    .opacity(isHovering ? 1 : 0)
-                            )
                     }
-                    .buttonStyle(PlainButtonStyle())
-                    .focusable(false)
-                    .onHover { _ in NSCursor.pointingHand.push() }
-                } else {
-                    Image(systemName: "music.note")
-                        .font(uiFont(size: metrics.headerIconSize))
-                        .foregroundColor(theme.iconColor)
-                        .frame(width: buttonSide, height: buttonSide)
-                        .background(theme.controlSurface.opacity(0.5))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
-            }
-            
-            VStack(alignment: .leading, spacing: metrics.isCompactWidth ? 1 : 2) {
-                if noPlaybackDetected {
-                    Text("No Playback")
-                        .font(uiFont(size: metrics.headerTitleSize, weight: .semibold))
-                        .foregroundColor(theme.primaryText)
-                    Text("Play music to see lyrics")
-                        .font(uiFont(size: metrics.headerSubtitleSize))
-                        .foregroundColor(theme.mutedText(0.5))
-                } else {
-                    Text(song.title)
-                        .font(uiFont(size: metrics.headerTitleSize, weight: .semibold))
-                        .foregroundColor(theme.primaryText)
-                        .lineLimit(1)
-                    Text(song.artist)
-                        .font(uiFont(size: metrics.headerSubtitleSize))
-                        .foregroundColor(theme.mutedText(0.5))
-                        .lineLimit(1)
-                }
-            }
-            
-            Spacer()
-            
-            HStack(spacing: metrics.isCompactWidth ? 6 : 8) {
-                settingsButton(metrics: metrics)
                 
-                controlButton(
-                    systemImage: isPinned ? "pin.fill" : "pin",
-                    size: metrics.headerButtonSize
-                ) {
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
-                        isPinned.toggle()
-                        if isPinned {
-                            // When pinning, ensure bars are visible
-                            isHovering = true
-                        } else {
-                            // When unpinning, restore hover state
-                            isHovering = isPointerInside || showSettings
+                VStack(alignment: .leading, spacing: metrics.isCompactWidth ? 1 : 2) {
+                    if noPlaybackDetected {
+                        Text("No Playback")
+                            .font(uiFont(size: metrics.headerTitleSize, weight: .semibold))
+                            .foregroundColor(theme.primaryText)
+                        Text("Play music to see lyrics")
+                            .font(uiFont(size: metrics.headerSubtitleSize))
+                            .foregroundColor(theme.mutedText(0.5))
+                    } else {
+                        Text(song.title)
+                            .font(uiFont(size: metrics.headerTitleSize, weight: .semibold))
+                            .foregroundColor(theme.primaryText)
+                            .lineLimit(1)
+                        Text(song.artist)
+                            .font(uiFont(size: metrics.headerSubtitleSize))
+                            .foregroundColor(theme.mutedText(0.5))
+                            .lineLimit(1)
+                    }
+                }
+                
+                Spacer()
+                
+                HStack(spacing: metrics.isCompactWidth ? 6 : 8) {
+                    settingsButton(metrics: metrics, isResizing: isResizing)
+                    
+                    controlButton(
+                        systemImage: isPinned ? "pin.fill" : "pin",
+                        size: metrics.headerButtonSize
+                    ) {
+                        let animation = isResizing ? nil : Animation.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)
+                        withAnimation(animation) {
+                            isPinned.toggle()
+                            if isPinned {
+                                // When pinning, ensure bars are visible
+                                isHovering = true
+                            } else {
+                                // When unpinning, restore hover state
+                                isHovering = isPointerInside || showSettings
+                            }
                         }
                     }
-                }
-                
-                controlButton(systemImage: "xmark", size: metrics.headerButtonSize) {
-                    NSApplication.shared.terminate(nil)
+                    
+                    controlButton(systemImage: "xmark", size: metrics.headerButtonSize) {
+                        NSApplication.shared.terminate(nil)
+                    }
                 }
             }
+            .padding(.horizontal, metrics.headerHorizontalPadding)
+            .padding(.top, metrics.headerVerticalPadding)
+            .padding(.bottom, metrics.isCompactWidth ? 8 : 10)
+            
+            // Progress bar integrated into header
+            /* Temporarily commented out for Figma design work
+            if !noPlaybackDetected {
+                VStack(spacing: metrics.isCompactWidth ? 4 : 6) {
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            Rectangle()
+                                .fill(theme.progressTrack)
+                                .frame(height: metrics.progressHeight)
+                            
+                            Rectangle()
+                                .fill(theme.accent.opacity(0.8))
+                                .frame(
+                                    width: geometry.size.width * CGFloat(songDuration > 0 ? currentTime / songDuration : 0),
+                                    height: metrics.progressHeight
+                                )
+                                .animation(.interpolatingSpring(stiffness: 120, damping: 20), value: currentTime)
+                        }
+                    }
+                    .frame(height: metrics.progressHeight)
+                    .padding(.horizontal, metrics.headerHorizontalPadding)
+                    
+                    HStack {
+                        Text(formatTime(currentTime))
+                            .font(uiFont(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundColor(theme.mutedText(0.5))
+                        
+                        Spacer()
+                        
+                        Text(formatTime(songDuration))
+                            .font(uiFont(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundColor(theme.mutedText(0.5))
+                    }
+                    .padding(.horizontal, metrics.headerHorizontalPadding)
+                }
+                .padding(.bottom, metrics.headerVerticalPadding)
+                .opacity(isHovering || isPinned ? 1.0 : 0.0)
+                .offset(y: isHovering || isPinned ? 0 : -10)
+                .animation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1), value: isHovering)
+                .animation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1), value: isPinned)
+            }
+            */
         }
-        .padding(.horizontal, metrics.headerHorizontalPadding)
-        .padding(.vertical, metrics.headerVerticalPadding)
         .frame(maxWidth: metrics.isWideWidth ? min(metrics.width * 0.75, 760) : .infinity)
         .frame(maxWidth: .infinity)
-        .background(Color.clear)
+        .background(
+            // Header background with rounded top corners - fully transparent
+            UnevenRoundedRectangle(
+                topLeadingRadius: settings.cornerRadius,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: settings.cornerRadius
+            )
+            .fill(Color.clear)
+        )
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: settings.cornerRadius,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: settings.cornerRadius
+            )
+        )
     }
     
-    private func settingsButton(metrics: ResponsiveMetrics) -> some View {
+    private func settingsButton(metrics: ResponsiveMetrics, isResizing: Bool) -> some View {
         Button(action: {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
+            let animation = isResizing ? nil : Animation.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)
+            withAnimation(animation) {
                 showSettings.toggle()
             }
         }) {
@@ -1166,30 +1313,25 @@ struct LyricsWidgetView: View {
     // MARK: - Lyrics View
     
     @ViewBuilder
-    private func lyricsView(metrics: ResponsiveMetrics) -> some View {
+    private func lyricsView(metrics: ResponsiveMetrics, isResizing: Bool) -> some View {
         VStack(spacing: metrics.lyricsVerticalSpacing) {
             if isLoadingLyrics {
-                VStack(spacing: 12) {
-                    ProgressView()
-                        .scaleEffect(metrics.isCompactWidth ? 0.7 : 0.8)
-                        .tint(theme.accent)
-                    Text("Fetching lyrics…")
-                        .font(uiFont(size: metrics.isCompactWidth ? 13 : 14))
-                        .foregroundColor(theme.mutedText(0.45))
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                loadingView(metrics: metrics)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
             } else if let error = lyricsError {
                 placeholderView(
                     systemImage: error == "Instrumental track" ? "music.note" : "exclamationmark.triangle",
                     message: error,
                     metrics: metrics
                 )
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
             } else if song.lyrics.isEmpty {
                 placeholderView(
                     systemImage: "music.note.list",
                     message: "No lyrics available",
                     metrics: metrics
                 )
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
             } else {
                 Spacer(minLength: metrics.lyricsVerticalGutter)
                 ForEach(Array(getVisibleLines().enumerated()), id: \.element.id) { offset, item in
@@ -1208,13 +1350,70 @@ struct LyricsWidgetView: View {
                         )
                     )
                 }
-                .animation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1), value: currentLineIndex)
+                .animation(isResizing ? nil : .spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1), value: currentLineIndex)
                 Spacer(minLength: metrics.lyricsVerticalGutter)
             }
         }
         .padding(.horizontal, metrics.contentHorizontalPadding)
         .frame(maxWidth: metrics.isWideWidth ? min(metrics.width * 0.75, 760) : .infinity)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1), value: isLoadingLyrics)
+    }
+    
+    // MARK: - Loading View
+    
+    @ViewBuilder
+    private func loadingView(metrics: ResponsiveMetrics) -> some View {
+        TimelineView(.periodic(from: .now, by: 0.05)) { context in
+            VStack(spacing: 20) {
+                // Custom animated loading indicator
+                HStack(spacing: 8) {
+                    ForEach(0..<3) { index in
+                        Circle()
+                            .fill(theme.accent)
+                            .frame(width: metrics.isCompactWidth ? 8 : 10, height: metrics.isCompactWidth ? 8 : 10)
+                            .scaleEffect(loadingDotScale(for: index, date: context.date))
+                            .opacity(loadingDotOpacity(for: index, date: context.date))
+                            .animation(.easeInOut(duration: 0.6), value: loadingDotScale(for: index, date: context.date))
+                    }
+                }
+                .frame(height: metrics.isCompactWidth ? 20 : 24)
+                
+                // Loading text with subtle pulse
+                Text("Fetching lyrics…")
+                    .font(uiFont(size: metrics.isCompactWidth ? 13 : 14, weight: .medium))
+                    .foregroundColor(theme.mutedText(0.6))
+                    .opacity(loadingTextOpacity(date: context.date))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+    
+    // MARK: - Loading Animation Helpers
+    
+    private func loadingDotScale(for index: Int, date: Date) -> CGFloat {
+        let baseTime = date.timeIntervalSince1970
+        let delay = Double(index) * 0.2
+        let phase = ((baseTime * 0.5) + delay).truncatingRemainder(dividingBy: 1.0)
+        
+        // Smooth scale animation: 0.4 -> 1.0 -> 0.4
+        if phase < 0.5 {
+            return 0.4 + (phase * 2.0) * 0.6
+        } else {
+            return 1.0 - ((phase - 0.5) * 2.0) * 0.6
+        }
+    }
+    
+    private func loadingDotOpacity(for index: Int, date: Date) -> Double {
+        let scale = loadingDotScale(for: index, date: date)
+        // Opacity follows scale for smoother effect
+        return Double(scale * 0.7 + 0.3)
+    }
+    
+    private func loadingTextOpacity(date: Date) -> Double {
+        let baseTime = date.timeIntervalSince1970
+        // Subtle pulse for text
+        return 0.5 + sin(baseTime * 2 * .pi * 0.5) * 0.1 + 0.4
     }
     
     private func placeholderView(systemImage: String, message: String, metrics: ResponsiveMetrics) -> some View {
@@ -1231,44 +1430,7 @@ struct LyricsWidgetView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
-    // MARK: - Progress Bar View
-    
-    private func progressBarView(metrics: ResponsiveMetrics) -> some View {
-        VStack(spacing: metrics.isCompactWidth ? 6 : 8) {
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(theme.progressTrack)
-                        .frame(height: metrics.progressHeight)
-                    
-                    Rectangle()
-                        .fill(theme.primaryText.opacity(0.7))
-                        .frame(
-                            width: geometry.size.width * CGFloat(songDuration > 0 ? currentTime / songDuration : 0),
-                            height: metrics.progressHeight
-                        )
-                        .animation(.interpolatingSpring(stiffness: 120, damping: 20), value: currentTime)
-                }
-            }
-            .frame(height: metrics.progressHeight)
-            
-            HStack {
-                Text(formatTime(currentTime))
-                    .font(uiFont(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(theme.mutedText(0.48))
-                
-                Spacer()
-                
-                Text(formatTime(songDuration))
-                    .font(uiFont(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(theme.mutedText(0.48))
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .padding(.horizontal, metrics.contentHorizontalPadding)
-        .frame(maxWidth: metrics.isWideWidth ? min(metrics.width * 0.75, 760) : .infinity)
-        .frame(maxWidth: .infinity)
-    }
+    // MARK: - Progress Bar View (now integrated into header)
     
     // MARK: - Settings Popover
     
@@ -1603,38 +1765,46 @@ struct LyricsWidgetView: View {
     
     @ViewBuilder
     private func artworkBackdropView(artwork: NSImage, metrics: ResponsiveMetrics) -> some View {
-        ZStack {
-            // Blurred artwork background
-            Image(nsImage: artwork)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .blur(radius: 40)
-                .scaleEffect(1.1) // Slight scale to avoid edges
-                .clipped()
-            
-            // Color overlay
-            if let dominantColor = dominantColor {
-                dominantColor
-                    .opacity(0.6)
-                    .blendMode(.overlay)
-            } else {
-                Color.black.opacity(0.3)
+        GeometryReader { geometry in
+            ZStack {
+                // Blurred artwork background - optimized blur and edge handling
+                Image(nsImage: artwork)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    // Extend beyond bounds to prevent edge artifacts
+                    .frame(
+                        width: geometry.size.width + 100,
+                        height: geometry.size.height + 100
+                    )
+                    .blur(radius: 28) // Reduced from 40 for better performance
+                    .scaleEffect(1.15) // Increased slightly for better edge coverage
+                    .offset(x: 0, y: 0) // Center the extended image
+                    .clipped()
+                
+                // Color overlay
+                if let dominantColor = dominantColor {
+                    dominantColor
+                        .opacity(0.6)
+                        .blendMode(.overlay)
+                } else {
+                    Color.black.opacity(0.3)
+                }
+                
+                // Gradient overlay for better text readability
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(0.2),
+                        Color.clear,
+                        Color.clear,
+                        Color.black.opacity(0.2)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
             }
-            
-            // Gradient overlay for better text readability
-            LinearGradient(
-                colors: [
-                    Color.black.opacity(0.2),
-                    Color.clear,
-                    Color.clear,
-                    Color.black.opacity(0.2)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped() // Ensure content doesn't overflow
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             extractDominantColor(from: artwork)
         }
@@ -2189,6 +2359,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.contentView = containerView
         containerView.autoresizingMask = [.width, .height]
         containerView.wantsLayer = true
+        containerView.layer?.masksToBounds = true
         
         let hostingView = controller.view
         hostingView.translatesAutoresizingMaskIntoConstraints = false
