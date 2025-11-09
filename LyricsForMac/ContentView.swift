@@ -693,6 +693,16 @@ struct ResponsiveMetrics {
     var width: CGFloat { size.width }
     var height: CGFloat { size.height }
     
+    private var screenScale: CGFloat {
+        let factor = NSScreen.main?.backingScaleFactor ?? 2.0
+        return factor > 0 ? factor : 2.0
+    }
+    
+    private func pixelAligned(_ value: CGFloat) -> CGFloat {
+        let scale = screenScale
+        return (value * scale).rounded(.down) / scale
+    }
+    
     // Enhanced breakpoints with smooth transitions
     var isVeryCompactWidth: Bool { width < 400 }
     var isCompactWidth: Bool { width < 520 }
@@ -825,6 +835,26 @@ struct ResponsiveMetrics {
     var lyricHorizontalPadding: CGFloat {
         // Percentage-based
         max(12, width * 0.027)
+    }
+    
+    private var lyricStackMaxWidth: CGFloat {
+        if isWideWidth {
+            return min(width * 0.75, 760)
+        }
+        return width
+    }
+    
+    private var lyricSafetyBuffer: CGFloat { 6 }
+    
+    var lockedLyricContainerWidth: CGFloat {
+        let paddedWidth = lyricStackMaxWidth - (contentHorizontalPadding * 2)
+        let safeWidth = max(0, paddedWidth - lyricSafetyBuffer)
+        return pixelAligned(safeWidth)
+    }
+    
+    var lockedLyricTextWidth: CGFloat {
+        let available = lockedLyricContainerWidth - (lyricHorizontalPadding * 2)
+        return pixelAligned(max(0, available))
     }
     
     var lyricCurrentScale: CGFloat {
@@ -2151,23 +2181,36 @@ struct LyricLineView: View {
     let metrics: ResponsiveMetrics
     
     var body: some View {
-        let fontSize = isCurrent ? metrics.lyricCurrentSize : metrics.lyricSecondarySize
-        let scale = isCurrent ? metrics.lyricCurrentScale : metrics.lyricSecondaryScale
+        let baseFontSize = metrics.lyricCurrentSize
+        let layoutScale = max(metrics.lyricCurrentScale, 0.0001)
+        let secondaryScale = metrics.lyricSecondaryScale
+        let secondaryFontSize = metrics.lyricSecondarySize
+        let baseFontSizeSafe = max(baseFontSize, 0.0001)
+        let secondaryTargetScale = (secondaryFontSize * secondaryScale) / baseFontSizeSafe
+        let resolvedScale = isCurrent ? layoutScale : secondaryTargetScale
+        let lockedTextWidth = metrics.lockedLyricTextWidth
+        let containerWidth = metrics.lockedLyricContainerWidth
+        let lineContainerWidth: CGFloat? = containerWidth > 0 ? containerWidth : nil
+        let textLayoutWidth: CGFloat? = lockedTextWidth > 0 ? lockedTextWidth / layoutScale : nil
         Text(line.text)
             .font(
                 .system(
-                    size: fontSize,
-                    weight: isCurrent ? .bold : .regular,
+                    size: baseFontSize,
+                    weight: .medium,
                     design: .monospaced
                 )
             )
             .foregroundColor(isCurrent ? theme.primaryText : theme.primaryText.opacity(isPast ? 0.3 : 0.25))
             .multilineTextAlignment(.center)
+            .allowsTightening(false)
+            .tracking(0)
+            .kerning(0)
             .lineLimit(nil)
             .fixedSize(horizontal: false, vertical: true)
+            .frame(width: textLayoutWidth, alignment: .center)
             .padding(.vertical, metrics.lyricVerticalPadding)
             .padding(.horizontal, metrics.lyricHorizontalPadding)
-            .scaleEffect(scale)
+            .scaleEffect(resolvedScale)
             .blur(radius: isCurrent ? 0 : metrics.lyricBlurRadius)
             .shadow(
                 color: isCurrent ? theme.primaryText.opacity(0.12) : .clear,
@@ -2189,6 +2232,7 @@ struct LyricLineView: View {
                     transaction.animation = .spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)
                 }
             }
+            .frame(width: lineContainerWidth)
             .frame(maxWidth: .infinity)
     }
 }
