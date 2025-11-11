@@ -743,8 +743,13 @@ struct ResponsiveMetrics {
     }
     
     var headerReservedHeight: CGFloat {
+        // Don't reserve any space - header will overlay content
+        return 0
+    }
+    
+    var headerHeight: CGFloat {
         if isMinimized { return 48 }
-        // Temporarily reverted - progress bar commented out for Figma design work
+        // Actual header height for overlay positioning
         return interpolate(compact: 56, medium: 60, wide: 64)
     }
     
@@ -1045,28 +1050,20 @@ struct LyricsWidgetView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 }
                 
-                // Main content
-                VStack(spacing: 0) {
-                    Color.clear
-                        .frame(height: metrics.headerReservedHeight)
-                    
-                    lyricsView(metrics: metrics, isResizing: isResizing)
-                }
-                .zIndex(1)
-                
-                // Header (on top) - constrained to stay within bounds
-                VStack(spacing: 0) {
-                    headerView(metrics: metrics, isResizing: isResizing)
-                        .opacity(isHovering || isPinned ? 1.0 : 0.0)
-                        .offset(y: isHovering || isPinned ? 0 : -20)
-                        .allowsHitTesting(isHovering || isPinned) // Don't block hover when hidden
-                        .animation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1), value: isHovering)
-                        .animation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1), value: isPinned)
-                        .zIndex(2)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .zIndex(2)
+                // Main content fills entire window
+                lyricsView(metrics: metrics, isResizing: isResizing)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .zIndex(1)
+            }
+            .ignoresSafeArea(.all) // Extend content into title bar area
+            .overlay(alignment: .top) {
+                // Header floats on top
+                headerView(metrics: metrics, isResizing: isResizing)
+                    .opacity(isHovering || isPinned ? 1.0 : 0.0)
+                    .offset(y: isHovering || isPinned ? 0 : -20)
+                    .allowsHitTesting(isHovering || isPinned) // Don't block hover when hidden
+                    .animation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1), value: isHovering)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1), value: isPinned)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle()) // Ensure entire ZStack area is hoverable
@@ -1363,6 +1360,7 @@ struct LyricsWidgetView: View {
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.95)))
             } else {
+                // Symmetrical spacers keep lyrics centered regardless of header state
                 Spacer(minLength: metrics.lyricsVerticalGutter)
                 ForEach(Array(getVisibleLines().enumerated()), id: \.element.id) { offset, item in
                     LyricLineView(
@@ -2360,6 +2358,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         let rootView = LyricsWidgetView(song: sampleSong)
+            .ignoresSafeArea(.all) // Critical: extend content into title bar area
             .frame(
                 minWidth: 400,
                 idealWidth: 600,
