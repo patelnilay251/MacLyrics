@@ -1,2 +1,7 @@
-LyricsForMac.xcodeproj/project.xcworkspace/xcuserdata/nilay.xcuserdatad/UserInterfaceState.xcuserstate
-LyricsForMac.xcodeproj/project.xcworkspace/xcuserdata/nilay.xcuserdatad/UserInterfaceState.xcuserstate
+# Xcode user-specific files
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+
+# Xcode workspace user data
+*.xcworkspace/xcuserdata/
