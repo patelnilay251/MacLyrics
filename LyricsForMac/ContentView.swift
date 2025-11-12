@@ -10,6 +10,18 @@ import AppKit
 import Combine
 import Carbon
 import CryptoKit
+import OSLog
+
+// MARK: - Logger
+
+extension Logger {
+    private static var subsystem = Bundle.main.bundleIdentifier ?? "com.quickflow.LyricsForMac"
+    
+    static let lyrics = Logger(subsystem: subsystem, category: "lyrics")
+    static let playback = Logger(subsystem: subsystem, category: "playback")
+    static let artwork = Logger(subsystem: subsystem, category: "artwork")
+    static let hotkey = Logger(subsystem: subsystem, category: "hotkey")
+}
 
 // MARK: - Data Models
 
@@ -44,13 +56,15 @@ extension AppDelegate: NSWindowDelegate {
     }
 }
 
-struct Song {
+struct Song: Identifiable {
+    let id: String
     let title: String
     let artist: String
     let lyrics: [LyricLine]
     let artwork: NSImage?
     
     init(title: String, artist: String, lyrics: [LyricLine], artwork: NSImage? = nil) {
+        self.id = "\(title)|\(artist)"
         self.title = title
         self.artist = artist
         self.lyrics = lyrics
@@ -97,7 +111,7 @@ class LyricsService {
         ]
         
         guard let url = components.url else {
-            print("❌ Invalid URL")
+            Logger.lyrics.error("Invalid URL for lyrics request")
             return nil
         }
         
@@ -108,17 +122,17 @@ class LyricsService {
             let (data, response) = try await URLSession.shared.data(for: request)
             
             guard let httpResponse = response as? HTTPURLResponse else {
-                print("❌ Invalid response")
+                Logger.lyrics.error("Invalid HTTP response")
                 return nil
             }
             
             if httpResponse.statusCode == 404 {
-                print("❌ Lyrics not found in LRCLIB database")
+                Logger.lyrics.info("Lyrics not found in LRCLIB database for \(title) by \(artist)")
                 return nil
             }
             
             guard httpResponse.statusCode == 200 else {
-                print("❌ API returned status code: \(httpResponse.statusCode)")
+                Logger.lyrics.error("API returned status code: \(httpResponse.statusCode)")
                 return nil
             }
             
@@ -126,14 +140,14 @@ class LyricsService {
             
             // Check if instrumental
             if result.instrumental == true {
-                print("🎼 Track is instrumental (no lyrics)")
+                Logger.lyrics.info("Track is instrumental (no lyrics): \(title) by \(artist)")
                 await LyricsCache.shared.store(lyrics: [], title: title, artist: artist, duration: duration)
                 return []
             }
             
             // Try synced lyrics first (preferred)
             if let syncedLyrics = result.syncedLyrics {
-                print("✅ Found synced lyrics!")
+                Logger.lyrics.info("Found synced lyrics for \(title) by \(artist)")
                 let parsed = parseLRC(syncedLyrics)
                 await LyricsCache.shared.store(lyrics: parsed, title: title, artist: artist, duration: duration)
                 return parsed
@@ -141,17 +155,17 @@ class LyricsService {
             
             // Fallback to plain lyrics (no timestamps)
             if let plainLyrics = result.plainLyrics {
-                print("⚠️ Found plain lyrics only (no timestamps)")
+                Logger.lyrics.info("Found plain lyrics (no timestamps) for \(title) by \(artist)")
                 let parsed = parsePlainLyrics(plainLyrics)
                 await LyricsCache.shared.store(lyrics: parsed, title: title, artist: artist, duration: duration)
                 return parsed
             }
             
-            print("❌ No lyrics available")
+            Logger.lyrics.info("No lyrics available for \(title) by \(artist)")
             return nil
             
         } catch {
-            print("❌ Error fetching lyrics: \(error.localizedDescription)")
+            Logger.lyrics.error("Error fetching lyrics: \(error.localizedDescription)")
             return nil
         }
     }
@@ -547,28 +561,7 @@ class ArtworkCache {
     }
 }
 
-let sampleSong = Song(
-    title: "Ethereal Dreams",
-    artist: "Luna Rivers",
-    lyrics: [
-        LyricLine(time: 0, text: "In the silence of the night"),
-        LyricLine(time: 3, text: "I hear whispers in the wind"),
-        LyricLine(time: 6, text: "Dancing shadows paint the walls"),
-        LyricLine(time: 9, text: "As the moonlight filters in"),
-        LyricLine(time: 13, text: "Every moment feels surreal"),
-        LyricLine(time: 16, text: "Lost in echoes of your voice"),
-        LyricLine(time: 19, text: "Time stands still when you're near"),
-        LyricLine(time: 22, text: "In this dream I have no choice"),
-        LyricLine(time: 26, text: "We're floating through the stars"),
-        LyricLine(time: 29, text: "Where reality fades away"),
-        LyricLine(time: 32, text: "In this ethereal embrace"),
-        LyricLine(time: 35, text: "Forever we will stay"),
-        LyricLine(time: 39, text: "Colors blend and intertwine"),
-        LyricLine(time: 42, text: "Like watercolors in the rain"),
-        LyricLine(time: 45, text: "Every heartbeat synchronizes"),
-        LyricLine(time: 48, text: "To this sweet melodic chain")
-    ]
-)
+// Sample song removed - app now starts with empty state
 
 // MARK: - Theme Definitions
 
@@ -927,8 +920,8 @@ class AppSettings: ObservableObject {
     @Published var windowOpacity: Double = 1.0
     @Published var cornerRadius: Double = 16.0
     @Published var themeMode: ThemeMode = .matchSystem
-    @Published var manualTheme: ThemePreset = .desert
-    @Published var fontScale: Double = 1.0
+    @Published var manualTheme: ThemePreset = .midnight
+    @Published var fontScale: Double = 0.8
     @Published var cachingEnabled: Bool {
         didSet {
             UserDefaults.standard.set(cachingEnabled, forKey: cachingEnabledKey)
@@ -949,20 +942,15 @@ class AppSettings: ObservableObject {
     }
     
     func palette(for colorScheme: ColorScheme) -> ThemePalette {
-        switch themeMode {
-        case .matchSystem:
-            return colorScheme == .dark ? ThemePreset.midnight.palette : ThemePreset.desert.palette
-        case .manual:
-            return manualTheme.palette
-        }
+        return manualTheme.palette
     }
     
     func reset() {
         windowOpacity = 1.0
         cornerRadius = 16.0
         themeMode = .matchSystem
-        manualTheme = .desert
-        fontScale = 1.0
+        manualTheme = .midnight
+        fontScale = 0.8
         cachingEnabled = true
         cacheStats = .empty
     }
@@ -1046,12 +1034,14 @@ struct LyricsWidgetView: View {
                 // Artwork backdrop (behind everything)
                 if showArtworkBackdrop, let artwork = song.artwork {
                     artworkBackdropView(artwork: artwork, metrics: metrics)
+                        .id("backdrop-\(song.id)")
                         .zIndex(0)
-                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
                 
                 // Main content fills entire window
                 lyricsView(metrics: metrics, isResizing: isResizing)
+                    .id("lyrics-\(song.id)")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .zIndex(1)
             }
@@ -1113,13 +1103,14 @@ struct LyricsWidgetView: View {
                     extractDominantColor(from: artwork)
                     // Show backdrop by default when artwork is available
                     if !showArtworkBackdrop {
-                        let animation = isResizing ? nil : Animation.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)
+                        let animation = isResizing ? nil : Animation.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)
                         withAnimation(animation) {
                             showArtworkBackdrop = true
                         }
                     }
                 }
             }
+            .animation(isResizing ? nil : .spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15), value: song.artwork)
         .onChange(of: showSettings, initial: false) { _, newValue in
             if !isPinned && !isResizing {
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
@@ -1174,6 +1165,8 @@ struct LyricsWidgetView: View {
                                         .fill(Color.black.opacity(0.1))
                                         .opacity(isHovering ? 1 : 0)
                                 )
+                                .id("artwork-\(song.id)")
+                                .transition(.opacity.combined(with: .scale(scale: 0.9)))
                         }
                         .buttonStyle(PlainButtonStyle())
                         .focusable(false)
@@ -1193,20 +1186,28 @@ struct LyricsWidgetView: View {
                         Text("No Playback")
                             .font(uiFont(size: metrics.headerTitleSize, weight: .semibold))
                             .foregroundColor(theme.primaryText)
+                            .transition(.opacity.combined(with: .offset(y: -5)))
                         Text("Play music to see lyrics")
                             .font(uiFont(size: metrics.headerSubtitleSize))
                             .foregroundColor(theme.mutedText(0.5))
+                            .transition(.opacity.combined(with: .offset(y: -5)))
                     } else {
                         Text(song.title)
                             .font(uiFont(size: metrics.headerTitleSize, weight: .semibold))
                             .foregroundColor(theme.primaryText)
                             .lineLimit(1)
+                            .id("title-\(song.id)")
+                            .transition(.opacity.combined(with: .offset(y: -5)))
                         Text(song.artist)
                             .font(uiFont(size: metrics.headerSubtitleSize))
                             .foregroundColor(theme.mutedText(0.5))
                             .lineLimit(1)
+                            .id("artist-\(song.id)")
+                            .transition(.opacity.combined(with: .offset(y: -5)))
                     }
                 }
+                .animation(isResizing ? nil : .spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1), value: song.id)
+                .animation(isResizing ? nil : .spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1), value: noPlaybackDetected)
                 
                 Spacer()
                 
@@ -1344,21 +1345,30 @@ struct LyricsWidgetView: View {
         VStack(spacing: metrics.lyricsVerticalSpacing) {
             if isLoadingLyrics {
                 loadingView(metrics: metrics)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.9)).combined(with: .offset(y: 10)),
+                        removal: .opacity.combined(with: .scale(scale: 0.95)).combined(with: .offset(y: -10))
+                    ))
             } else if let error = lyricsError {
                 placeholderView(
                     systemImage: error == "Instrumental track" ? "music.note" : "exclamationmark.triangle",
                     message: error,
                     metrics: metrics
                 )
-                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .scale(scale: 0.9)).combined(with: .offset(y: 10)),
+                    removal: .opacity.combined(with: .scale(scale: 0.95)).combined(with: .offset(y: -10))
+                ))
             } else if song.lyrics.isEmpty {
                 placeholderView(
                     systemImage: "music.note.list",
                     message: "No lyrics available",
                     metrics: metrics
                 )
-                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .scale(scale: 0.9)).combined(with: .offset(y: 10)),
+                    removal: .opacity.combined(with: .scale(scale: 0.95)).combined(with: .offset(y: -10))
+                ))
             } else {
                 // Symmetrical spacers keep lyrics centered regardless of header state
                 Spacer(minLength: metrics.lyricsVerticalGutter)
@@ -1385,7 +1395,10 @@ struct LyricsWidgetView: View {
         .padding(.horizontal, metrics.contentHorizontalPadding)
         .frame(maxWidth: metrics.isWideWidth ? min(metrics.width * 0.75, 760) : .infinity)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1), value: isLoadingLyrics)
+        .animation(isResizing ? nil : .spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15), value: isLoadingLyrics)
+        .animation(isResizing ? nil : .spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15), value: lyricsError)
+        .animation(isResizing ? nil : .spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15), value: song.title)
+        .animation(isResizing ? nil : .spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15), value: song.lyrics.isEmpty)
     }
     
     // MARK: - Loading View
@@ -1494,39 +1507,25 @@ struct LyricsWidgetView: View {
             }
             .padding(.bottom, 2)
             
-            // Theme Section
+            // Settings Panel
             VStack(alignment: .leading, spacing: rowSpacing) {
-                Picker("Theme Mode", selection: $settings.themeMode) {
-                    ForEach(ThemeMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .pickerStyle(SegmentedPickerStyle())
-                .labelsHidden()
-                .frame(height: 24)
-                
-                if settings.themeMode == .manual {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(ThemePreset.allCases) { preset in
-                                CompactThemeButton(
-                                    preset: preset,
-                                    isSelected: preset == settings.manualTheme,
-                                    highlightColor: theme.accent
-                                ) {
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85, blendDuration: 0.1)) {
-                                        settings.manualTheme = preset
-                                    }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(ThemePreset.allCases) { preset in
+                            CompactThemeButton(
+                                preset: preset,
+                                isSelected: preset == settings.manualTheme,
+                                highlightColor: theme.accent
+                            ) {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85, blendDuration: 0.1)) {
+                                    settings.manualTheme = preset
                                 }
                             }
                         }
-                        .padding(.vertical, 2)
                     }
+                    .padding(.vertical, 2)
                 }
-            }
-            
-            // Appearance Controls
-            VStack(alignment: .leading, spacing: rowSpacing) {
+                
                 SettingRow(
                     label: "Opacity",
                     value: "\(Int(settings.windowOpacity * 100))%",
@@ -1537,6 +1536,7 @@ struct LyricsWidgetView: View {
                         .frame(height: 4)
                 }
                 
+                /* Temporarily commented out - border radius slider removed
                 SettingRow(
                     label: "Corner Radius",
                     value: "\(Int(settings.cornerRadius))px",
@@ -1546,6 +1546,7 @@ struct LyricsWidgetView: View {
                         .accentColor(theme.accent)
                         .frame(height: 4)
                 }
+                */
                 
                 SettingRow(
                     label: "Font Size",
@@ -1990,7 +1991,7 @@ struct LyricsWidgetView: View {
             let (data, _) = try await URLSession.shared.data(from: url)
             return NSImage(data: data)
         } catch {
-            print("❌ Failed to download artwork: \(error.localizedDescription)")
+            Logger.artwork.error("Failed to download artwork: \(error.localizedDescription)")
             return nil
         }
     }
@@ -2016,14 +2017,18 @@ struct LyricsWidgetView: View {
         if playback.title != lastTrackTitle && !playback.title.isEmpty {
             lastTrackTitle = playback.title
             
-            print("🎵 Track changed to: \(playback.title) by \(playback.artist)")
+            Logger.playback.info("Track changed to: \(playback.title) by \(playback.artist)")
             
             // Reset current line index when track changes
-            currentLineIndex = 0
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)) {
+                currentLineIndex = 0
+            }
             
             // Update song info and fetch lyrics
-            isLoadingLyrics = true
-            lyricsError = nil
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)) {
+                isLoadingLyrics = true
+                lyricsError = nil
+            }
             
             // Load artwork asynchronously
             Task {
@@ -2037,26 +2042,31 @@ struct LyricsWidgetView: View {
                 )
                 
                 await MainActor.run {
-                    if let lyrics = fetchedLyrics {
-                        if lyrics.isEmpty {
-                            lyricsError = "Instrumental track"
+                    // Smooth transition when song changes
+                    withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)) {
+                        if let lyrics = fetchedLyrics {
+                            if lyrics.isEmpty {
+                                lyricsError = "Instrumental track"
+                            } else {
+                                lyricsError = nil
+                            }
+                            song = Song(
+                                title: playback.title,
+                                artist: playback.artist,
+                                lyrics: lyrics,
+                                artwork: artwork
+                            )
+                        } else {
+                            lyricsError = "Lyrics not found"
+                            song = Song(
+                                title: playback.title,
+                                artist: playback.artist,
+                                lyrics: [],
+                                artwork: artwork
+                            )
                         }
-                        song = Song(
-                            title: playback.title,
-                            artist: playback.artist,
-                            lyrics: lyrics,
-                            artwork: artwork
-                        )
-                    } else {
-                        lyricsError = "Lyrics not found"
-                        song = Song(
-                            title: playback.title,
-                            artist: playback.artist,
-                            lyrics: [],
-                            artwork: artwork
-                        )
+                        isLoadingLyrics = false
                     }
-                    isLoadingLyrics = false
                 }
                 await refreshCacheStats()
             }
@@ -2133,7 +2143,7 @@ struct CompactThemeButton: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 4) {
-                RoundedRectangle(cornerRadius: 6)
+                Circle()
                     .fill(
                         LinearGradient(
                             colors: [preset.palette.background, preset.palette.header],
@@ -2141,27 +2151,27 @@ struct CompactThemeButton: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 40, height: 32)
+                    .frame(width: 24, height: 24)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6)
+                        Circle()
                             .stroke(isSelected ? highlightColor : preset.palette.border.opacity(0.6), lineWidth: isSelected ? 1.5 : 0.5)
                     )
                     .overlay(
                         Group {
                             if isSelected {
                                 Image(systemName: "checkmark")
-                                    .font(.system(size: 9, weight: .bold))
+                                    .font(.system(size: 8, weight: .bold))
                                     .foregroundColor(highlightColor)
                             }
                         }
                     )
                 
                 Text(preset.displayName)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
                     .foregroundColor(preset.palette.primaryText.opacity(isSelected ? 0.9 : 0.6))
                     .lineLimit(1)
             }
-            .frame(width: 50)
+            .frame(width: 36)
         }
         .buttonStyle(PlainButtonStyle())
         .focusable(false)
@@ -2357,7 +2367,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return window
         }
         
-        let rootView = LyricsWidgetView(song: sampleSong)
+        let rootView = LyricsWidgetView(song: Song(title: "", artist: "", lyrics: []))
             .ignoresSafeArea(.all) // Critical: extend content into title bar area
             .frame(
                 minWidth: 400,
@@ -2476,7 +2486,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         let status = RegisterEventHotKey(UInt32(kVK_ANSI_L), modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
         if status != noErr {
-            print("❌ Failed to register global hot key: \(status)")
+            Logger.hotkey.error("Failed to register global hot key: \(status)")
         }
     }
     
