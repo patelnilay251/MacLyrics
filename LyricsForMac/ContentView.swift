@@ -970,6 +970,8 @@ struct LyricsWidgetView: View {
     @State private var noPlaybackDetected = false
     @State private var isLoadingLyrics = false
     @State private var lyricsError: String? = nil
+    @State private var pendingSongTitle: String? = nil
+    @State private var pendingSongArtist: String? = nil
     @State private var isHovering = false
     @State private var isPointerInside = false
     @State private var showSettings = false
@@ -979,6 +981,7 @@ struct LyricsWidgetView: View {
     @State private var isResizing = false
     @State private var previousSize: CGSize = .zero
     @StateObject private var settings = AppSettings()
+    @StateObject private var swipeHandler = BrowserSwipeHandler()
     @Environment(\.colorScheme) private var colorScheme
     
     init(song: Song) {
@@ -987,6 +990,20 @@ struct LyricsWidgetView: View {
     
     private var theme: ThemePalette {
         settings.palette(for: colorScheme)
+    }
+    
+    private var effectiveWindowOpacity: Double {
+        // Dim the entire window more when no playback is detected
+        let base = settings.windowOpacity
+        return noPlaybackDetected ? base * 0.55 : base
+    }
+
+    private var windowFocusBlurRadius: CGFloat {
+        noPlaybackDetected ? 3.0 : 0.0
+    }
+    
+    private var focusTransitionAnimation: Animation {
+        .easeInOut(duration: 0.65)
     }
     
     private var borderColor: Color {
@@ -1075,7 +1092,9 @@ struct LyricsWidgetView: View {
                 x: 0,
                 y: isResizing ? 6 : 10
             )
-            .opacity(settings.windowOpacity)
+            .blur(radius: windowFocusBlurRadius)
+            .opacity(effectiveWindowOpacity)
+            .animation(focusTransitionAnimation, value: noPlaybackDetected)
             .onHover { hovering in
                 isPointerInside = hovering
                 if isPinned {
@@ -1127,9 +1146,15 @@ struct LyricsWidgetView: View {
                     showArtworkBackdrop = true
                 }
             }
+            swipeHandler.configure(
+                onPrevious: { previousTrack() },
+                onNext: { nextTrack() }
+            )
+            swipeHandler.start()
         }
         .onDisappear {
             stopTimer()
+            swipeHandler.stop()
         }
     }
     }
@@ -1142,35 +1167,10 @@ struct LyricsWidgetView: View {
         VStack(spacing: 0) {
             // Top row: Artwork, Title/Artist, Controls
             HStack(spacing: metrics.isCompactWidth ? 10 : 14) {
-                // Artwork or placeholder
+                // Artwork with circular progress ring and gestures
                 Group {
                     if let artwork = song.artwork {
-                        Button(action: {
-                            let animation = isResizing ? nil : Animation.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)
-                            withAnimation(animation) {
-                                showArtworkBackdrop.toggle()
-                            }
-                        }) {
-                            Image(nsImage: artwork)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: buttonSide, height: buttonSide)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(theme.border.opacity(0.2), lineWidth: 0.5)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .fill(Color.black.opacity(0.1))
-                                        .opacity(isHovering ? 1 : 0)
-                                )
-                                .id("artwork-\(song.id)")
-                                .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .focusable(false)
-                        .onHover { _ in NSCursor.pointingHand.push() }
+                        artworkWithProgressRing(artwork: artwork, size: buttonSide, metrics: metrics, isResizing: isResizing)
                     } else {
                         Image(systemName: "music.note")
                             .font(uiFont(size: metrics.headerIconSize))
@@ -1182,29 +1182,20 @@ struct LyricsWidgetView: View {
                 }
                 
                 VStack(alignment: .leading, spacing: metrics.isCompactWidth ? 1 : 2) {
-                    if noPlaybackDetected {
-                        Text("No Playback")
-                            .font(uiFont(size: metrics.headerTitleSize, weight: .semibold))
-                            .foregroundColor(theme.primaryText)
-                            .transition(.opacity.combined(with: .offset(y: -5)))
-                        Text("Play music to see lyrics")
-                            .font(uiFont(size: metrics.headerSubtitleSize))
-                            .foregroundColor(theme.mutedText(0.5))
-                            .transition(.opacity.combined(with: .offset(y: -5)))
-                    } else {
-                        Text(song.title)
-                            .font(uiFont(size: metrics.headerTitleSize, weight: .semibold))
-                            .foregroundColor(theme.primaryText)
-                            .lineLimit(1)
-                            .id("title-\(song.id)")
-                            .transition(.opacity.combined(with: .offset(y: -5)))
-                        Text(song.artist)
-                            .font(uiFont(size: metrics.headerSubtitleSize))
-                            .foregroundColor(theme.mutedText(0.5))
-                            .lineLimit(1)
-                            .id("artist-\(song.id)")
-                            .transition(.opacity.combined(with: .offset(y: -5)))
-                    }
+                    // When no playback is detected, avoid showing "No Playback" text;
+                    // keep the header quiet and only show real track metadata when available.
+                    Text(song.title)
+                        .font(uiFont(size: metrics.headerTitleSize, weight: .semibold))
+                        .foregroundColor(theme.primaryText)
+                        .lineLimit(1)
+                        .id("title-\(song.id)")
+                        .transition(.opacity.combined(with: .offset(y: -5)))
+                    Text(song.artist)
+                        .font(uiFont(size: metrics.headerSubtitleSize))
+                        .foregroundColor(theme.mutedText(0.5))
+                        .lineLimit(1)
+                        .id("artist-\(song.id)")
+                        .transition(.opacity.combined(with: .offset(y: -5)))
                 }
                 .animation(isResizing ? nil : .spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1), value: song.id)
                 .animation(isResizing ? nil : .spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1), value: noPlaybackDetected)
@@ -1337,124 +1328,295 @@ struct LyricsWidgetView: View {
         .onHover { _ in NSCursor.arrow.set() }
     }
     
+    // MARK: - Artwork with Progress Ring
+    
+    @ViewBuilder
+    private func artworkWithProgressRing(artwork: NSImage, size: CGFloat, metrics: ResponsiveMetrics, isResizing: Bool) -> some View {
+        let progress = songDuration > 0 ? currentTime / songDuration : 0.0
+        let ringWidth: CGFloat = 2.5
+        
+        ZStack {
+            // Background ring (track)
+            Circle()
+                .stroke(theme.progressTrack, lineWidth: ringWidth)
+                .frame(width: size, height: size)
+            
+            // Progress ring (animated)
+            Circle()
+                .trim(from: 0, to: CGFloat(progress))
+                .stroke(
+                    Color.white,
+                    style: StrokeStyle(
+                        lineWidth: ringWidth,
+                        lineCap: .round
+                    )
+                )
+                .frame(width: size, height: size)
+                .rotationEffect(.degrees(-90)) // Start from top
+                .animation(.linear(duration: 0.2), value: progress)
+            
+            // Artwork image
+            Image(nsImage: artwork)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size - ringWidth * 2, height: size - ringWidth * 2)
+                .clipShape(Circle())
+                .overlay(
+                    Circle()
+                        .stroke(theme.border.opacity(0.15), lineWidth: 0.5)
+                )
+                .overlay(
+                    Circle()
+                        .fill(Color.black.opacity(isPlaying ? 0 : 0.2))
+                )
+                .overlay(
+                    Group {
+                        if !isPlaying && !noPlaybackDetected {
+                            Image(systemName: "play.fill")
+                                .font(uiFont(size: size * 0.3, weight: .bold))
+                                .foregroundColor(.white)
+                                .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                        }
+                    }
+                )
+        }
+        .frame(width: size, height: size)
+        .contentShape(Circle())
+        .onTapGesture {
+            playPause()
+        }
+        .onHover { hovering in
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.arrow.set()
+            }
+        }
+        .id("artwork-\(song.id)")
+        .transition(.opacity.combined(with: .scale(scale: 0.9)))
+    }
+    
     
     // MARK: - Lyrics View
     
     @ViewBuilder
     private func lyricsView(metrics: ResponsiveMetrics, isResizing: Bool) -> some View {
+        ZStack {
+            lyricsContent(metrics: metrics, isResizing: isResizing)
+                .padding(.horizontal, metrics.contentHorizontalPadding)
+            lyricsStatusOverlay(metrics: metrics)
+        }
+        .frame(maxWidth: metrics.isWideWidth ? min(metrics.width * 0.75, 760) : .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(isResizing ? nil : .spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15), value: song.title)
+        .animation(isResizing ? nil : .spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15), value: lyricsStatusKey)
+    }
+
+    @ViewBuilder
+    private func lyricsContent(metrics: ResponsiveMetrics, isResizing: Bool) -> some View {
         VStack(spacing: metrics.lyricsVerticalSpacing) {
-            if isLoadingLyrics {
+            Spacer(minLength: metrics.lyricsVerticalGutter)
+            ForEach(Array(getVisibleLines().enumerated()), id: \.element.id) { offset, item in
+                LyricLineView(
+                    line: item.line,
+                    isCurrent: item.index == currentLineIndex,
+                    isPast: item.index < currentLineIndex,
+                    theme: theme,
+                    metrics: metrics
+                )
+                .id(item.index)
+                .transition(
+                    .asymmetric(
+                        insertion: lineInsertionTransition,
+                        removal: lineRemovalTransition
+                    )
+                )
+            }
+            .animation(isResizing ? nil : .spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1), value: currentLineIndex)
+            Spacer(minLength: metrics.lyricsVerticalGutter)
+        }
+    }
+
+    private var lyricsStatusKey: String {
+        if isLoadingLyrics { return "loading" }
+        if let error = lyricsError { return "error-\(error)" }
+        if song.lyrics.isEmpty {
+            return noPlaybackDetected ? "empty-noplayback" : "empty"
+        }
+        return "ready"
+    }
+    
+    @ViewBuilder
+    private func lyricsStatusOverlay(metrics: ResponsiveMetrics) -> some View {
+        if isLoadingLyrics {
+            overlayContainer(metrics: metrics, blocksInteraction: true, hasCard: false) {
                 loadingView(metrics: metrics)
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.9)).combined(with: .offset(y: 10)),
-                        removal: .opacity.combined(with: .scale(scale: 0.95)).combined(with: .offset(y: -10))
-                    ))
-            } else if let error = lyricsError {
+            }
+            .transition(statusOverlayTransition)
+        } else if let error = lyricsError {
+            overlayContainer(metrics: metrics, blocksInteraction: false) {
                 placeholderView(
                     systemImage: error == "Instrumental track" ? "music.note" : "exclamationmark.triangle",
                     message: error,
                     metrics: metrics
                 )
-                .transition(.asymmetric(
-                    insertion: .opacity.combined(with: .scale(scale: 0.9)).combined(with: .offset(y: 10)),
-                    removal: .opacity.combined(with: .scale(scale: 0.95)).combined(with: .offset(y: -10))
-                ))
-            } else if song.lyrics.isEmpty {
-                placeholderView(
-                    systemImage: "music.note.list",
-                    message: "No lyrics available",
-                    metrics: metrics
-                )
-                .transition(.asymmetric(
-                    insertion: .opacity.combined(with: .scale(scale: 0.9)).combined(with: .offset(y: 10)),
-                    removal: .opacity.combined(with: .scale(scale: 0.95)).combined(with: .offset(y: -10))
-                ))
+            }
+            .transition(statusOverlayTransition)
+        } else if song.lyrics.isEmpty {
+            // Temporarily disable the "No lyrics available" overlay to avoid brief flashes
+            // on startup or during track changes. Keeping the implementation below commented
+            // for future reuse if needed.
+            /*
+            if noPlaybackDetected {
+                // On startup / when no music app is active, keep the window softly visible
+                // without showing "Play music to see lyrics" or "No lyrics" messaging.
+                EmptyView()
             } else {
-                // Symmetrical spacers keep lyrics centered regardless of header state
-                Spacer(minLength: metrics.lyricsVerticalGutter)
-                ForEach(Array(getVisibleLines().enumerated()), id: \.element.id) { offset, item in
-                    LyricLineView(
-                        line: item.line,
-                        isCurrent: item.index == currentLineIndex,
-                        isPast: item.index < currentLineIndex,
-                        theme: theme,
-                        metrics: metrics
-                    )
-                    .id(item.index)
-                    .transition(
-                        .asymmetric(
-                            insertion: lineInsertionTransition,
-                            removal: lineRemovalTransition
-                        )
-                    )
+                let icon = "music.note.list"
+                let message = "No lyrics available"
+                overlayContainer(metrics: metrics, blocksInteraction: false) {
+                    placeholderView(systemImage: icon, message: message, metrics: metrics)
                 }
-                .animation(isResizing ? nil : .spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1), value: currentLineIndex)
-                Spacer(minLength: metrics.lyricsVerticalGutter)
+                .transition(statusOverlayTransition)
+            }
+            */
+            EmptyView()
+        }
+    }
+    
+    private var statusOverlayTransition: AnyTransition {
+        .opacity.combined(with: .scale(scale: 0.98))
+    }
+    
+    @ViewBuilder
+    private func overlayContainer<Content: View>(
+        metrics: ResponsiveMetrics,
+        blocksInteraction: Bool,
+        hasCard: Bool = true,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ZStack {
+            theme.background.opacity(0.55)
+                .blendMode(.multiply)
+                .ignoresSafeArea()
+            Group {
+                if hasCard {
+                    content()
+                        .padding(.horizontal, metrics.isCompactWidth ? 18 : 24)
+                        .padding(.vertical, metrics.isCompactWidth ? 20 : 26)
+                        .background(.regularMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .shadow(color: shadowColor.opacity(0.4), radius: 22, x: 0, y: 12)
+                } else {
+                    content()
+                }
             }
         }
-        .padding(.horizontal, metrics.contentHorizontalPadding)
-        .frame(maxWidth: metrics.isWideWidth ? min(metrics.width * 0.75, 760) : .infinity)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(isResizing ? nil : .spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15), value: isLoadingLyrics)
-        .animation(isResizing ? nil : .spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15), value: lyricsError)
-        .animation(isResizing ? nil : .spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15), value: song.title)
-        .animation(isResizing ? nil : .spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15), value: song.lyrics.isEmpty)
+        .allowsHitTesting(blocksInteraction)
     }
     
     // MARK: - Loading View
     
     @ViewBuilder
     private func loadingView(metrics: ResponsiveMetrics) -> some View {
-        TimelineView(.periodic(from: .now, by: 0.05)) { context in
-            VStack(spacing: 20) {
-                // Custom animated loading indicator
-                HStack(spacing: 8) {
-                    ForEach(0..<3) { index in
-                        Circle()
-                            .fill(theme.accent)
-                            .frame(width: metrics.isCompactWidth ? 8 : 10, height: metrics.isCompactWidth ? 8 : 10)
-                            .scaleEffect(loadingDotScale(for: index, date: context.date))
-                            .opacity(loadingDotOpacity(for: index, date: context.date))
-                            .animation(.easeInOut(duration: 0.6), value: loadingDotScale(for: index, date: context.date))
-                    }
-                }
-                .frame(height: metrics.isCompactWidth ? 20 : 24)
+        // Temporarily disabled spinning vinyl; keeping only dimmed overlay.
+        // Original implementation kept here for reference:
+        /*
+        TimelineView(.periodic(from: .now, by: 1.0 / 60.0)) { context in
+            let rotation = vinylRotationAngle(for: context.date)
+            let pulseScale = vinylPulseScale(for: context.date)
+            let shimmer = vinylShimmerOpacity(for: context.date)
+            let vinylSize: CGFloat = metrics.isCompactWidth ? 96 : 118
+            let labelSize = vinylSize * 0.34
+            let spindleSize = vinylSize * 0.12
+            
+            ZStack {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            gradient: Gradient(colors: [
+                                theme.accent.opacity(0.95),
+                                theme.accent.opacity(0.45),
+                                theme.background.opacity(0.75)
+                            ]),
+                            center: .center,
+                            startRadius: 0,
+                            endRadius: vinylSize / 2
+                        )
+                    )
+                    .shadow(color: theme.accent.opacity(0.35), radius: 14, x: 0, y: 8)
                 
-                // Loading text with subtle pulse
-                Text("Fetching lyrics…")
-                    .font(uiFont(size: metrics.isCompactWidth ? 13 : 14, weight: .medium))
-                    .foregroundColor(theme.mutedText(0.6))
-                    .opacity(loadingTextOpacity(date: context.date))
+                Circle()
+                    .stroke(theme.primaryText.opacity(0.18 + shimmer * 0.15), lineWidth: vinylSize * 0.08)
+                    .blur(radius: 12)
+                    .opacity(0.5)
+                
+                ForEach(0..<6, id: \.self) { groove in
+                    let inset = CGFloat(groove) * (vinylSize * 0.08)
+                    Circle()
+                        .stroke(theme.primaryText.opacity(0.08), lineWidth: 0.8)
+                        .frame(width: vinylSize - inset, height: vinylSize - inset)
+                }
+                
+                Circle()
+                    .fill(theme.header.opacity(0.92))
+                    .frame(width: labelSize, height: labelSize)
+                    .overlay(
+                        Circle()
+                            .stroke(theme.border.opacity(0.4), lineWidth: 1)
+                    )
+                    .overlay(
+                        VStack(spacing: 3) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(theme.accent.opacity(0.85))
+                                .frame(width: labelSize * 0.45, height: 3)
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(theme.accent.opacity(0.65))
+                                .frame(width: labelSize * 0.3, height: 2)
+                        }
+                    )
+                
+                Circle()
+                    .fill(theme.background.opacity(0.9))
+                    .frame(width: spindleSize, height: spindleSize)
+                    .overlay(
+                        Circle()
+                            .stroke(theme.primaryText.opacity(0.15), lineWidth: 1)
+                    )
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(width: vinylSize, height: vinylSize)
+            .rotationEffect(rotation)
+            .scaleEffect(pulseScale)
+            .shadow(color: shadowColor.opacity(0.45), radius: 24, x: 0, y: 14)
         }
+        */
+        EmptyView()
     }
     
     // MARK: - Loading Animation Helpers
     
-    private func loadingDotScale(for index: Int, date: Date) -> CGFloat {
-        let baseTime = date.timeIntervalSince1970
-        let delay = Double(index) * 0.2
-        let phase = ((baseTime * 0.5) + delay).truncatingRemainder(dividingBy: 1.0)
-        
-        // Smooth scale animation: 0.4 -> 1.0 -> 0.4
-        if phase < 0.5 {
-            return 0.4 + (phase * 2.0) * 0.6
-        } else {
-            return 1.0 - ((phase - 0.5) * 2.0) * 0.6
+    private func vinylRotationAngle(for date: Date) -> Angle {
+        let speed = 90.0 // degrees per second
+        let progress = date.timeIntervalSinceReferenceDate * speed
+        return .degrees(progress.truncatingRemainder(dividingBy: 360))
+    }
+    
+    private func vinylPulseScale(for date: Date) -> CGFloat {
+        let time = date.timeIntervalSinceReferenceDate
+        return 1.0 + CGFloat(sin(time * 2.2)) * 0.025
+    }
+    
+    private func vinylShimmerOpacity(for date: Date) -> Double {
+        let time = date.timeIntervalSinceReferenceDate
+        return 0.4 + (sin(time * 1.6) + 1.0) * 0.25
+    }
+    
+    private func sanitizedDisplayString(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
         }
-    }
-    
-    private func loadingDotOpacity(for index: Int, date: Date) -> Double {
-        let scale = loadingDotScale(for: index, date: date)
-        // Opacity follows scale for smoother effect
-        return Double(scale * 0.7 + 0.3)
-    }
-    
-    private func loadingTextOpacity(date: Date) -> Double {
-        let baseTime = date.timeIntervalSince1970
-        // Subtle pulse for text
-        return 0.5 + sin(baseTime * 2 * .pi * 0.5) * 0.1 + 0.4
+        return value
     }
     
     private func placeholderView(systemImage: String, message: String, metrics: ResponsiveMetrics) -> some View {
@@ -1468,7 +1630,6 @@ struct LyricsWidgetView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     // MARK: - Progress Bar View (now integrated into header)
@@ -2028,6 +2189,8 @@ struct LyricsWidgetView: View {
             withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)) {
                 isLoadingLyrics = true
                 lyricsError = nil
+                pendingSongTitle = playback.title
+                pendingSongArtist = playback.artist
             }
             
             // Load artwork asynchronously
@@ -2066,6 +2229,8 @@ struct LyricsWidgetView: View {
                             )
                         }
                         isLoadingLyrics = false
+                        pendingSongTitle = nil
+                        pendingSongArtist = nil
                     }
                 }
                 await refreshCacheStats()
@@ -2252,6 +2417,106 @@ struct ScaleButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
             .animation(.spring(response: 0.2, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Browser-Style Swipe Handler
+
+final class BrowserSwipeHandler: ObservableObject {
+    private enum Constants {
+        static let triggerThreshold: CGFloat = 85
+    }
+    
+    private var monitor: Any?
+    private var accumulatedDelta: CGFloat = 0
+    private var hasActiveGesture = false
+    private var trackingHorizontal = false
+    
+    var onPrevious: (() -> Void)?
+    var onNext: (() -> Void)?
+    
+    func configure(onPrevious: @escaping () -> Void, onNext: @escaping () -> Void) {
+        self.onPrevious = onPrevious
+        self.onNext = onNext
+    }
+    
+    func start() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self else { return event }
+            return self.handleScroll(event)
+        }
+    }
+    
+    func stop() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+        resetGesture()
+    }
+    
+    private func handleScroll(_ event: NSEvent) -> NSEvent? {
+        guard shouldHandle(event: event) else { return event }
+        
+        let (horizontal, vertical) = normalizedFingerDeltas(for: event)
+        
+        if event.phase == .began || event.phase == .mayBegin {
+            beginGesture(horizontal: horizontal, vertical: vertical)
+        } else if event.phase.isEmpty && !hasActiveGesture && event.momentumPhase.isEmpty {
+            beginGesture(horizontal: horizontal, vertical: vertical)
+        }
+        
+        if (event.phase == .changed || (event.phase.isEmpty && hasActiveGesture)) && trackingHorizontal {
+            accumulatedDelta += horizontal
+            if accumulatedDelta >= Constants.triggerThreshold {
+                onPrevious?()
+                resetGesture()
+                return nil
+            } else if accumulatedDelta <= -Constants.triggerThreshold {
+                onNext?()
+                resetGesture()
+                return nil
+            }
+        }
+        
+        if event.phase == .ended || event.phase == .cancelled || event.momentumPhase == .ended || event.momentumPhase == .cancelled {
+            resetGesture()
+        }
+        
+        return event
+    }
+    
+    private func beginGesture(horizontal: CGFloat, vertical: CGFloat) {
+        hasActiveGesture = true
+        trackingHorizontal = abs(horizontal) > abs(vertical)
+        accumulatedDelta = 0
+        if !trackingHorizontal {
+            hasActiveGesture = false
+        }
+    }
+    
+    private func resetGesture() {
+        hasActiveGesture = false
+        trackingHorizontal = false
+        accumulatedDelta = 0
+    }
+    
+    private func normalizedFingerDeltas(for event: NSEvent) -> (CGFloat, CGFloat) {
+        let factor: CGFloat = event.isDirectionInvertedFromDevice ? -1 : 1
+        let horizontal = event.scrollingDeltaX * factor
+        let vertical = event.scrollingDeltaY * factor
+        return (horizontal, vertical)
+    }
+    
+    private func shouldHandle(event: NSEvent) -> Bool {
+        guard let window = event.window else { return false }
+        guard let keyWindow = NSApp.keyWindow else { return false }
+        return window == keyWindow
+    }
+    
+    deinit {
+        stop()
     }
 }
 
