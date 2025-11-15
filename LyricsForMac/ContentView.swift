@@ -10,6 +10,7 @@ import AppKit
 import Combine
 import Carbon
 import CryptoKit
+import QuartzCore
 import OSLog
 
 // MARK: - Logger
@@ -53,6 +54,180 @@ extension AppDelegate: NSWindowDelegate {
     func windowDidChangeScreen(_ notification: Notification) {
         guard let panel = notification.object as? NSPanel else { return }
         recordGeometry(of: panel, userAdjusted: hasUserAdjustedPosition, persist: true)
+    }
+}
+
+struct WindowPresentationAnimator {
+    static func animate(window: NSWindow, effect: WindowPresentationEffect) {
+        guard effect != .none else { return }
+        guard let contentView = window.contentView else { return }
+        contentView.wantsLayer = true
+        guard let layer = contentView.layer else { return }
+        layer.opacity = 1.0
+        
+        switch effect {
+        case .scaleFade:
+            performScaleFade(on: layer, in: contentView)
+        case .genie:
+            performGenie(on: layer, in: contentView)
+        case .slide:
+            performSlide(on: layer)
+        case .layered:
+            performLayered(on: layer)
+        case .none:
+            break
+        }
+    }
+    
+    private static func performScaleFade(on layer: CALayer, in view: NSView) {
+        let duration: CFTimeInterval = 0.32
+        let anchor = CGPoint(x: 0.5, y: 0.05)
+        let originalAnchor = layer.anchorPoint
+        let originalPosition = layer.position
+        let newPosition = CGPoint(
+            x: view.bounds.width * anchor.x,
+            y: view.bounds.height * anchor.y
+        )
+        
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.anchorPoint = anchor
+        layer.position = newPosition
+        CATransaction.commit()
+        
+        let timing = CAMediaTimingFunction(name: .easeInEaseOut)
+        
+        let scaleAnimation = CABasicAnimation(keyPath: "transform.scale")
+        scaleAnimation.fromValue = 0.8
+        scaleAnimation.toValue = 1.0
+        scaleAnimation.duration = duration
+        scaleAnimation.timingFunction = timing
+        
+        let opacityAnimation = CABasicAnimation(keyPath: "opacity")
+        opacityAnimation.fromValue = 0.0
+        opacityAnimation.toValue = 1.0
+        opacityAnimation.duration = duration
+        opacityAnimation.timingFunction = timing
+        
+        let group = CAAnimationGroup()
+        group.duration = duration
+        group.timingFunction = timing
+        group.animations = [scaleAnimation, opacityAnimation]
+        layer.add(group, forKey: "windowScaleFade")
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak layer] in
+            guard let layer else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.anchorPoint = originalAnchor
+            layer.position = originalPosition
+            CATransaction.commit()
+        }
+    }
+    
+    private static func performGenie(on layer: CALayer, in view: NSView) {
+        let duration: CFTimeInterval = 0.45
+        let bounds = view.bounds
+        let maskLayer = CAShapeLayer()
+        maskLayer.path = genieEndPath(for: bounds)
+        layer.mask = maskLayer
+        
+        let animation = CABasicAnimation(keyPath: "path")
+        animation.fromValue = genieStartPath(for: bounds)
+        animation.toValue = genieEndPath(for: bounds)
+        animation.duration = duration
+        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        animation.fillMode = .forwards
+        animation.isRemovedOnCompletion = false
+        maskLayer.add(animation, forKey: "geniePath")
+        
+        let opacityAnimation = CABasicAnimation(keyPath: "opacity")
+        opacityAnimation.fromValue = 0.0
+        opacityAnimation.toValue = 1.0
+        opacityAnimation.duration = duration * 0.75
+        opacityAnimation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(opacityAnimation, forKey: "genieOpacity")
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak layer] in
+            layer?.mask = nil
+        }
+    }
+    
+    private static func genieStartPath(for bounds: CGRect) -> CGPath {
+        let width = max(60.0, bounds.width * 0.2)
+        let height = max(80.0, bounds.height * 0.22)
+        let originX = bounds.midX - width / 2
+        let originY = bounds.height - height * 0.4
+        let rect = CGRect(x: originX, y: originY, width: width, height: height)
+        
+        let path = CGMutablePath()
+        let controlOffset = height * 0.9
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY),
+            control: CGPoint(x: rect.midX, y: rect.minY - controlOffset)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+    
+    private static func genieEndPath(for bounds: CGRect) -> CGPath {
+        let radius = min(24.0, min(bounds.width, bounds.height) * 0.12)
+        return CGPath(
+            roundedRect: bounds,
+            cornerWidth: radius,
+            cornerHeight: radius,
+            transform: nil
+        )
+    }
+    
+    private static func performSlide(on layer: CALayer) {
+        let duration: CFTimeInterval = 0.3
+        let translation = CABasicAnimation(keyPath: "transform.translation.y")
+        translation.fromValue = -40.0
+        translation.toValue = 0.0
+        translation.duration = duration
+        translation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        
+        let opacity = CABasicAnimation(keyPath: "opacity")
+        opacity.fromValue = 0.0
+        opacity.toValue = 1.0
+        opacity.duration = duration * 0.9
+        opacity.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        
+        layer.add(translation, forKey: "slideTranslation")
+        layer.add(opacity, forKey: "slideOpacity")
+    }
+    
+    private static func performLayered(on layer: CALayer) {
+        let baseDuration: CFTimeInterval = 0.28
+        
+        let backgroundFade = CABasicAnimation(keyPath: "opacity")
+        backgroundFade.fromValue = 0.0
+        backgroundFade.toValue = 1.0
+        backgroundFade.duration = baseDuration
+        backgroundFade.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        layer.add(backgroundFade, forKey: "layeredBackgroundFade")
+        
+        guard let contentLayer = layer.sublayers?.first else { return }
+        
+        let contentGroup = CAAnimationGroup()
+        contentGroup.beginTime = CACurrentMediaTime() + 0.05
+        contentGroup.duration = 0.4
+        contentGroup.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        
+        let contentOpacity = CABasicAnimation(keyPath: "opacity")
+        contentOpacity.fromValue = 0.0
+        contentOpacity.toValue = 1.0
+        
+        let contentScale = CABasicAnimation(keyPath: "transform.scale")
+        contentScale.fromValue = 0.95
+        contentScale.toValue = 1.0
+        
+        contentGroup.animations = [contentOpacity, contentScale]
+        contentLayer.add(contentGroup, forKey: "layeredContent")
     }
 }
 
@@ -678,6 +853,40 @@ enum ThemePreset: String, CaseIterable, Identifiable {
     }
 }
 
+enum WindowPresentationEffect: String, CaseIterable, Identifiable {
+    case none
+    case scaleFade
+    case genie
+    case slide
+    case layered
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .none: return "None"
+        case .scaleFade: return "Scale & Fade"
+        case .genie: return "Genie Pull"
+        case .slide: return "Slide & Fade"
+        case .layered: return "Layered Reveal"
+        }
+    }
+    
+    static let storageKey = "WindowPresentationEffectPreference"
+    
+    static func persistedValue() -> WindowPresentationEffect {
+        guard let saved = UserDefaults.standard.string(forKey: storageKey),
+              let effect = WindowPresentationEffect(rawValue: saved) else {
+            return .scaleFade
+        }
+        return effect
+    }
+    
+    static func persist(_ effect: WindowPresentationEffect) {
+        UserDefaults.standard.set(effect.rawValue, forKey: storageKey)
+    }
+}
+
 struct ResponsiveMetrics {
     let size: CGSize
     let fontScale: Double
@@ -916,12 +1125,18 @@ struct ResponsiveMetrics {
 
 class AppSettings: ObservableObject {
     private let cachingEnabledKey = "LyricsCacheEnabled"
+    private let presentationEffectKey = WindowPresentationEffect.storageKey
     
     @Published var windowOpacity: Double = 1.0
     @Published var cornerRadius: Double = 16.0
     @Published var themeMode: ThemeMode = .matchSystem
     @Published var manualTheme: ThemePreset = .midnight
     @Published var fontScale: Double = 0.8
+    @Published var presentationEffect: WindowPresentationEffect {
+        didSet {
+            WindowPresentationEffect.persist(presentationEffect)
+        }
+    }
     @Published var cachingEnabled: Bool {
         didSet {
             UserDefaults.standard.set(cachingEnabled, forKey: cachingEnabledKey)
@@ -935,6 +1150,8 @@ class AppSettings: ObservableObject {
     init() {
         let stored = UserDefaults.standard.object(forKey: cachingEnabledKey) as? Bool ?? true
         _cachingEnabled = Published(initialValue: stored)
+        let storedEffect = WindowPresentationEffect.persistedValue()
+        _presentationEffect = Published(initialValue: storedEffect)
         
         Task {
             await LyricsCache.shared.setEnabled(stored)
@@ -951,6 +1168,7 @@ class AppSettings: ObservableObject {
         themeMode = .matchSystem
         manualTheme = .midnight
         fontScale = 0.8
+        presentationEffect = .scaleFade
         cachingEnabled = true
         cacheStats = .empty
     }
@@ -1184,18 +1402,18 @@ struct LyricsWidgetView: View {
                 VStack(alignment: .leading, spacing: metrics.isCompactWidth ? 1 : 2) {
                     // When no playback is detected, avoid showing "No Playback" text;
                     // keep the header quiet and only show real track metadata when available.
-                    Text(song.title)
-                        .font(uiFont(size: metrics.headerTitleSize, weight: .semibold))
-                        .foregroundColor(theme.primaryText)
-                        .lineLimit(1)
-                        .id("title-\(song.id)")
-                        .transition(.opacity.combined(with: .offset(y: -5)))
-                    Text(song.artist)
-                        .font(uiFont(size: metrics.headerSubtitleSize))
-                        .foregroundColor(theme.mutedText(0.5))
-                        .lineLimit(1)
-                        .id("artist-\(song.id)")
-                        .transition(.opacity.combined(with: .offset(y: -5)))
+                        Text(song.title)
+                            .font(uiFont(size: metrics.headerTitleSize, weight: .semibold))
+                            .foregroundColor(theme.primaryText)
+                            .lineLimit(1)
+                            .id("title-\(song.id)")
+                            .transition(.opacity.combined(with: .offset(y: -5)))
+                        Text(song.artist)
+                            .font(uiFont(size: metrics.headerSubtitleSize))
+                            .foregroundColor(theme.mutedText(0.5))
+                            .lineLimit(1)
+                            .id("artist-\(song.id)")
+                            .transition(.opacity.combined(with: .offset(y: -5)))
                 }
                 .animation(isResizing ? nil : .spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1), value: song.id)
                 .animation(isResizing ? nil : .spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1), value: noPlaybackDetected)
@@ -1474,10 +1692,10 @@ struct LyricsWidgetView: View {
             } else {
                 let icon = "music.note.list"
                 let message = "No lyrics available"
-                overlayContainer(metrics: metrics, blocksInteraction: false) {
-                    placeholderView(systemImage: icon, message: message, metrics: metrics)
-                }
-                .transition(statusOverlayTransition)
+            overlayContainer(metrics: metrics, blocksInteraction: false) {
+                placeholderView(systemImage: icon, message: message, metrics: metrics)
+            }
+            .transition(statusOverlayTransition)
             }
             */
             EmptyView()
@@ -1501,12 +1719,12 @@ struct LyricsWidgetView: View {
                 .ignoresSafeArea()
             Group {
                 if hasCard {
-                    content()
-                        .padding(.horizontal, metrics.isCompactWidth ? 18 : 24)
-                        .padding(.vertical, metrics.isCompactWidth ? 20 : 26)
-                        .background(.regularMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .shadow(color: shadowColor.opacity(0.4), radius: 22, x: 0, y: 12)
+            content()
+                .padding(.horizontal, metrics.isCompactWidth ? 18 : 24)
+                .padding(.vertical, metrics.isCompactWidth ? 20 : 26)
+                .background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .shadow(color: shadowColor.opacity(0.4), radius: 22, x: 0, y: 12)
                 } else {
                     content()
                 }
@@ -1532,7 +1750,7 @@ struct LyricsWidgetView: View {
             let spindleSize = vinylSize * 0.12
             
             ZStack {
-                Circle()
+                        Circle()
                     .fill(
                         RadialGradient(
                             gradient: Gradient(colors: [
@@ -1717,6 +1935,21 @@ struct LyricsWidgetView: View {
                     Slider(value: $settings.fontScale, in: 0.8...1.4, step: 0.05)
                         .accentColor(theme.accent)
                         .frame(height: 4)
+                }
+                
+                SettingRow(
+                    label: "Window Transition",
+                    value: settings.presentationEffect.displayName,
+                    theme: theme
+                ) {
+                    Picker("Window Transition", selection: $settings.presentationEffect) {
+                        ForEach(WindowPresentationEffect.allCases) { effect in
+                            Text(effect.displayName).tag(effect)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(MenuPickerStyle())
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             
@@ -2735,6 +2968,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.level = .floating
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
+        let effect = WindowPresentationEffect.persistedValue()
+        WindowPresentationAnimator.animate(window: window, effect: effect)
     }
     
     // MARK: - Hot Keys
