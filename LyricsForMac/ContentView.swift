@@ -2564,9 +2564,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         loadSavedWindowGeometry()
         registerGlobalHotKey()
         
-        if let window = ensureLyricsWindow() {
-            present(window: window, activateApp: true)
-        }
+        // Prepare the window lazily without showing it; users can toggle it via shortcut or menu bar.
+        _ = ensureLyricsWindow()
     }
     
     func applicationWillTerminate(_ notification: Notification) {
