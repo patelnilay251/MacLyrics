@@ -747,14 +747,8 @@ private struct VisibleLyricLine: Identifiable {
 
 // MARK: - Playback Detection Functions
 
-func runAppleScript(_ script: String) -> String? {
-    var error: NSDictionary?
-    guard let scriptObject = NSAppleScript(source: script) else { return nil }
-    let output = scriptObject.executeAndReturnError(&error)
-    return error == nil ? output.stringValue : nil
-}
-
-func getSpotifyPlayback() -> PlaybackInfo? {
+// Cached AppleScript objects for better performance (avoiding recompilation)
+private let spotifyScript: NSAppleScript? = {
     let script = """
     tell application "Spotify"
         if it is running then
@@ -775,25 +769,10 @@ func getSpotifyPlayback() -> PlaybackInfo? {
     end tell
     return ""
     """
-    
-    guard let result = runAppleScript(script), !result.isEmpty else { return nil }
-    let parts = result.components(separatedBy: "||||")
-    guard parts.count >= 5 else { return nil }
-    
-    let artworkURL = parts.count >= 6 && !parts[5].isEmpty ? parts[5] : nil
-    
-    return PlaybackInfo(
-        title: parts[0],
-        artist: parts[1],
-        position: Double(parts[2]) ?? 0,
-        duration: Double(parts[3]) ?? 0,
-        isPlaying: parts[4] == "true",
-        artworkURL: artworkURL,
-        artworkData: nil
-    )
-}
+    return NSAppleScript(source: script)
+}()
 
-func getAppleMusicPlayback() -> PlaybackInfo? {
+private let appleMusicScript: NSAppleScript? = {
     let script = """
     tell application "Music"
         if it is running then
@@ -821,8 +800,42 @@ func getAppleMusicPlayback() -> PlaybackInfo? {
     end tell
     return ""
     """
+    return NSAppleScript(source: script)
+}()
+
+func runAppleScript(_ script: String) -> String? {
+    var error: NSDictionary?
+    guard let scriptObject = NSAppleScript(source: script) else { return nil }
+    let output = scriptObject.executeAndReturnError(&error)
+    return error == nil ? output.stringValue : nil
+}
+
+func getSpotifyPlayback() -> PlaybackInfo? {
+    var error: NSDictionary?
+    guard let script = spotifyScript else { return nil }
+    guard let result = script.executeAndReturnError(&error).stringValue, !result.isEmpty, error == nil else { return nil }
     
-    guard let result = runAppleScript(script), !result.isEmpty else { return nil }
+    let parts = result.components(separatedBy: "||||")
+    guard parts.count >= 5 else { return nil }
+    
+    let artworkURL = parts.count >= 6 && !parts[5].isEmpty ? parts[5] : nil
+    
+    return PlaybackInfo(
+        title: parts[0],
+        artist: parts[1],
+        position: Double(parts[2]) ?? 0,
+        duration: Double(parts[3]) ?? 0,
+        isPlaying: parts[4] == "true",
+        artworkURL: artworkURL,
+        artworkData: nil
+    )
+}
+
+func getAppleMusicPlayback() -> PlaybackInfo? {
+    var error: NSDictionary?
+    guard let script = appleMusicScript else { return nil }
+    guard let result = script.executeAndReturnError(&error).stringValue, !result.isEmpty, error == nil else { return nil }
+    
     let parts = result.components(separatedBy: "||||")
     guard parts.count >= 5 else { return nil }
     
@@ -1349,6 +1362,53 @@ class AppSettings: ObservableObject {
     }
 }
 
+// MARK: - Playback Notification Handler
+
+class PlaybackNotificationHandler: ObservableObject {
+    private var observers: [NSObjectProtocol] = []
+    var onTrackChange: (() -> Void)?
+    
+    func startListening(onTrackChange: @escaping () -> Void) {
+        self.onTrackChange = onTrackChange
+        
+        // Listen for Spotify track changes
+        let spotifyObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.spotify.client.PlaybackStateChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Logger.playback.info("Spotify track change notification received")
+            self?.onTrackChange?()
+        }
+        observers.append(spotifyObserver)
+        
+        // Listen for Apple Music track changes
+        let appleMusicObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.apple.Music.playerInfo"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Logger.playback.info("Apple Music track change notification received")
+            self?.onTrackChange?()
+        }
+        observers.append(appleMusicObserver)
+        
+        Logger.playback.info("Started listening for playback notifications")
+    }
+    
+    func stopListening() {
+        for observer in observers {
+            DistributedNotificationCenter.default().removeObserver(observer)
+        }
+        observers.removeAll()
+        Logger.playback.info("Stopped listening for playback notifications")
+    }
+    
+    deinit {
+        stopListening()
+    }
+}
+
 // MARK: - Main Content View
 
 struct LyricsWidgetView: View {
@@ -1375,6 +1435,7 @@ struct LyricsWidgetView: View {
     @State private var previousSize: CGSize = .zero
     @StateObject private var settings = AppSettings()
     @StateObject private var swipeHandler = BrowserSwipeHandler()
+    @StateObject private var notificationHandler = PlaybackNotificationHandler()
     @Environment(\.colorScheme) private var colorScheme
     
     init(song: Song) {
@@ -1531,7 +1592,15 @@ struct LyricsWidgetView: View {
             }
         }
         .onAppear {
+            // Start notification-based track change detection (instant response, zero CPU when idle)
+            notificationHandler.startListening {
+                // Immediately update when track changes
+                updateFromRealPlayback()
+            }
+            
+            // Start polling timer (reduced frequency: 1s instead of 0.2s)
             startTimer()
+            
             Task { await refreshCacheStats() }
             // Show backdrop by default if artwork is available
             if song.artwork != nil {
@@ -1547,6 +1616,7 @@ struct LyricsWidgetView: View {
         }
         .onDisappear {
             stopTimer()
+            notificationHandler.stopListening()
             swipeHandler.stop()
         }
     }
@@ -2317,8 +2387,9 @@ struct LyricsWidgetView: View {
     private func startTimer() {
         timer?.invalidate()
         
-        // Real playback monitoring - check every 200ms for smoother updates
-        timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
+        // Optimized: Poll every 1 second instead of 0.2s (80% CPU reduction)
+        // Track changes are handled instantly via notifications
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             updateFromRealPlayback()
         }
         // Add timer to common run loop modes to prevent stuttering during scrolling/interaction
@@ -2340,15 +2411,21 @@ struct LyricsWidgetView: View {
     }
     
     private func updateCurrentLine() {
-        if let newIndex = song.lyrics.firstIndex(where: { line in
-            let nextIndex = song.lyrics.firstIndex(where: { $0.time > line.time })
-            let nextTime = nextIndex.map { song.lyrics[$0].time } ?? Double.infinity
-            return currentTime >= line.time && currentTime < nextTime
-        }) {
-            if newIndex != currentLineIndex {
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)) {
-                    currentLineIndex = newIndex
-                }
+        // Optimized O(n) algorithm instead of O(n²)
+        // Start from the end and find the first line where currentTime >= line.time
+        guard !song.lyrics.isEmpty else { return }
+        
+        var newIndex = 0
+        for i in stride(from: song.lyrics.count - 1, through: 0, by: -1) {
+            if currentTime >= song.lyrics[i].time {
+                newIndex = i
+                break
+            }
+        }
+        
+        if newIndex != currentLineIndex {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)) {
+                currentLineIndex = newIndex
             }
         }
     }
@@ -2570,17 +2647,29 @@ struct LyricsWidgetView: View {
     private func updateFromRealPlayback() {
         guard let playback = getCurrentPlayback() else {
             // No playback detected
-            noPlaybackDetected = true
-            isPlaying = false
+            if !noPlaybackDetected {
+                noPlaybackDetected = true
+            }
+            if isPlaying {
+                isPlaying = false
+            }
             return
         }
         
-        noPlaybackDetected = false
+        if noPlaybackDetected {
+            noPlaybackDetected = false
+        }
         
-        // Update play state, position, and duration
-        isPlaying = playback.isPlaying
-        currentTime = playback.position
-        songDuration = playback.duration
+        // Conditional updates to avoid unnecessary view re-renders
+        if isPlaying != playback.isPlaying {
+            isPlaying = playback.isPlaying
+        }
+        if currentTime != playback.position {
+            currentTime = playback.position
+        }
+        if songDuration != playback.duration {
+            songDuration = playback.duration
+        }
         
         // Track change detection
         if playback.title != lastTrackTitle && !playback.title.isEmpty {
