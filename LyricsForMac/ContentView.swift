@@ -68,14 +68,44 @@ struct WindowPresentationAnimator {
         switch effect {
         case .scaleFade:
             performScaleFade(on: layer, in: contentView)
-        case .genie:
-            performGenie(on: layer, in: contentView)
+//        case .genie:
+//            performGenie(on: layer, in: contentView)
         case .slide:
             performSlide(on: layer)
         case .layered:
             performLayered(on: layer)
         case .none:
             break
+        }
+    }
+    
+    static func dismiss(window: NSWindow, effect: WindowPresentationEffect, completion: @escaping () -> Void) {
+        guard effect != .none else {
+            completion()
+            return
+        }
+        guard let contentView = window.contentView else {
+            completion()
+            return
+        }
+        contentView.wantsLayer = true
+        guard let layer = contentView.layer else {
+            completion()
+            return
+        }
+        layer.removeAllAnimations()
+        
+        switch effect {
+        case .scaleFade:
+            performScaleFadeDismiss(on: layer, in: contentView, completion: completion)
+//        case .genie:
+//            performGenieDismiss(on: layer, in: contentView, completion: completion)
+        case .slide:
+            performSlideDismiss(on: layer, completion: completion)
+        case .layered:
+            performLayeredDismiss(on: layer, completion: completion)
+        case .none:
+            completion()
         }
     }
     
@@ -125,63 +155,65 @@ struct WindowPresentationAnimator {
         }
     }
     
-    private static func performGenie(on layer: CALayer, in view: NSView) {
-        let duration: CFTimeInterval = 0.45
-        let bounds = view.bounds
-        let maskLayer = CAShapeLayer()
-        maskLayer.path = genieEndPath(for: bounds)
-        layer.mask = maskLayer
-        
-        let animation = CABasicAnimation(keyPath: "path")
-        animation.fromValue = genieStartPath(for: bounds)
-        animation.toValue = genieEndPath(for: bounds)
-        animation.duration = duration
-        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        animation.fillMode = .forwards
-        animation.isRemovedOnCompletion = false
-        maskLayer.add(animation, forKey: "geniePath")
-        
-        let opacityAnimation = CABasicAnimation(keyPath: "opacity")
-        opacityAnimation.fromValue = 0.0
-        opacityAnimation.toValue = 1.0
-        opacityAnimation.duration = duration * 0.75
-        opacityAnimation.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        layer.add(opacityAnimation, forKey: "genieOpacity")
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak layer] in
-            layer?.mask = nil
-        }
-    }
-    
-    private static func genieStartPath(for bounds: CGRect) -> CGPath {
-        let width = max(60.0, bounds.width * 0.2)
-        let height = max(80.0, bounds.height * 0.22)
-        let originX = bounds.midX - width / 2
-        let originY = bounds.height - height * 0.4
-        let rect = CGRect(x: originX, y: originY, width: width, height: height)
-        
-        let path = CGMutablePath()
-        let controlOffset = height * 0.9
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: rect.minY),
-            control: CGPoint(x: rect.midX, y: rect.minY - controlOffset)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.closeSubpath()
-        return path
-    }
-    
-    private static func genieEndPath(for bounds: CGRect) -> CGPath {
-        let radius = min(24.0, min(bounds.width, bounds.height) * 0.12)
-        return CGPath(
-            roundedRect: bounds,
-            cornerWidth: radius,
-            cornerHeight: radius,
-            transform: nil
-        )
-    }
+//    /* Genie Pull window transition temporarily disabled.
+//    private static func performGenie(on layer: CALayer, in view: NSView) {
+//        let duration: CFTimeInterval = 0.45
+//        let bounds = view.bounds
+//        let maskLayer = CAShapeLayer()
+//        maskLayer.path = genieEndPath(for: bounds)
+//        layer.mask = maskLayer
+//        
+//        let animation = CABasicAnimation(keyPath: "path")
+//        animation.fromValue = genieStartPath(for: bounds)
+//        animation.toValue = genieEndPath(for: bounds)
+//        animation.duration = duration
+//        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+//        animation.fillMode = .forwards
+//        animation.isRemovedOnCompletion = false
+//        maskLayer.add(animation, forKey: "geniePath")
+//        
+//        let opacityAnimation = CABasicAnimation(keyPath: "opacity")
+//        opacityAnimation.fromValue = 0.0
+//        opacityAnimation.toValue = 1.0
+//        opacityAnimation.duration = duration * 0.75
+//        opacityAnimation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+//        layer.add(opacityAnimation, forKey: "genieOpacity")
+//        
+//        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak layer] in
+//            layer?.mask = nil
+//        }
+//    }
+//    
+//    private static func genieStartPath(for bounds: CGRect) -> CGPath {
+//        let width = max(60.0, bounds.width * 0.2)
+//        let height = max(80.0, bounds.height * 0.22)
+//        let originX = bounds.midX - width / 2
+//        let originY = bounds.height - height * 0.4
+//        let rect = CGRect(x: originX, y: originY, width: width, height: height)
+//        
+//        let path = CGMutablePath()
+//        let controlOffset = height * 0.9
+//        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+//        path.addQuadCurve(
+//            to: CGPoint(x: rect.maxX, y: rect.minY),
+//            control: CGPoint(x: rect.midX, y: rect.minY - controlOffset)
+//        )
+//        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+//        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+//        path.closeSubpath()
+//        return path
+//    }
+//    
+//    private static func genieEndPath(for bounds: CGRect) -> CGPath {
+//        let radius = min(24.0, min(bounds.width, bounds.height) * 0.12)
+//        return CGPath(
+//            roundedRect: bounds,
+//            cornerWidth: radius,
+//            cornerHeight: radius,
+//            transform: nil
+//        )
+//    }
+//    */
     
     private static func performSlide(on layer: CALayer) {
         let duration: CFTimeInterval = 0.3
@@ -228,6 +260,149 @@ struct WindowPresentationAnimator {
         
         contentGroup.animations = [contentOpacity, contentScale]
         contentLayer.add(contentGroup, forKey: "layeredContent")
+    }
+    
+    private static func performScaleFadeDismiss(on layer: CALayer, in view: NSView, completion: @escaping () -> Void) {
+        let duration: CFTimeInterval = 0.25
+        let anchor = CGPoint(x: 0.5, y: 0.05)
+        let originalAnchor = layer.anchorPoint
+        let originalPosition = layer.position
+        let newPosition = CGPoint(
+            x: view.bounds.width * anchor.x,
+            y: view.bounds.height * anchor.y
+        )
+        
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.anchorPoint = anchor
+        layer.position = newPosition
+        CATransaction.commit()
+        
+        let timing = CAMediaTimingFunction(name: .easeInEaseOut)
+        
+        let scaleAnimation = CABasicAnimation(keyPath: "transform.scale")
+        scaleAnimation.fromValue = 1.0
+        scaleAnimation.toValue = 0.82
+        
+        let opacityAnimation = CABasicAnimation(keyPath: "opacity")
+        opacityAnimation.fromValue = 1.0
+        opacityAnimation.toValue = 0.0
+        
+        let group = CAAnimationGroup()
+        group.duration = duration
+        group.timingFunction = timing
+        group.animations = [scaleAnimation, opacityAnimation]
+        group.fillMode = .forwards
+        group.isRemovedOnCompletion = false
+        layer.add(group, forKey: "windowScaleFadeDismiss")
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            completion()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.anchorPoint = originalAnchor
+            layer.position = originalPosition
+            layer.opacity = 1.0
+            layer.removeAllAnimations()
+            CATransaction.commit()
+        }
+    }
+    
+//    private static func performGenieDismiss(on layer: CALayer, in view: NSView, completion: @escaping () -> Void) {
+//        let duration: CFTimeInterval = 0.4
+//        let bounds = view.bounds
+//        let maskLayer = CAShapeLayer()
+//        maskLayer.path = genieStartPath(for: bounds)
+//        layer.mask = maskLayer
+//        
+//        let animation = CABasicAnimation(keyPath: "path")
+//        animation.fromValue = genieEndPath(for: bounds)
+//        animation.toValue = genieStartPath(for: bounds)
+//        animation.duration = duration
+//        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+//        animation.fillMode = .forwards
+//        animation.isRemovedOnCompletion = false
+//        maskLayer.add(animation, forKey: "genieCollapse")
+//        
+//        let opacityAnimation = CABasicAnimation(keyPath: "opacity")
+//        opacityAnimation.fromValue = 1.0
+//        opacityAnimation.toValue = 0.0
+//        opacityAnimation.duration = duration * 0.9
+//        opacityAnimation.timingFunction = CAMediaTimingFunction(name: .easeIn)
+//        layer.add(opacityAnimation, forKey: "genieOpacityDismiss")
+//        
+//        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+//            completion()
+//            layer.mask = nil
+//            layer.opacity = 1.0
+//            layer.removeAllAnimations()
+//        }
+//    }
+    
+    private static func performSlideDismiss(on layer: CALayer, completion: @escaping () -> Void) {
+        let duration: CFTimeInterval = 0.22
+        let translation = CABasicAnimation(keyPath: "transform.translation.y")
+        translation.fromValue = 0.0
+        translation.toValue = -30.0
+        translation.duration = duration
+        translation.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        translation.fillMode = .forwards
+        translation.isRemovedOnCompletion = false
+        
+        let opacity = CABasicAnimation(keyPath: "opacity")
+        opacity.fromValue = 1.0
+        opacity.toValue = 0.0
+        opacity.duration = duration
+        opacity.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        opacity.fillMode = .forwards
+        opacity.isRemovedOnCompletion = false
+        
+        layer.add(translation, forKey: "slideTranslationDismiss")
+        layer.add(opacity, forKey: "slideOpacityDismiss")
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            completion()
+            layer.opacity = 1.0
+            layer.removeAllAnimations()
+        }
+    }
+    
+    private static func performLayeredDismiss(on layer: CALayer, completion: @escaping () -> Void) {
+        let duration: CFTimeInterval = 0.25
+        let backgroundFade = CABasicAnimation(keyPath: "opacity")
+        backgroundFade.fromValue = 1.0
+        backgroundFade.toValue = 0.0
+        backgroundFade.duration = duration
+        backgroundFade.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        backgroundFade.fillMode = .forwards
+        backgroundFade.isRemovedOnCompletion = false
+        layer.add(backgroundFade, forKey: "layeredBackgroundFadeDismiss")
+        
+        if let contentLayer = layer.sublayers?.first {
+            let contentGroup = CAAnimationGroup()
+            contentGroup.duration = duration
+            contentGroup.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            
+            let opacity = CABasicAnimation(keyPath: "opacity")
+            opacity.fromValue = 1.0
+            opacity.toValue = 0.0
+            
+            let scale = CABasicAnimation(keyPath: "transform.scale")
+            scale.fromValue = 1.0
+            scale.toValue = 0.92
+            
+            contentGroup.animations = [opacity, scale]
+            contentGroup.fillMode = .forwards
+            contentGroup.isRemovedOnCompletion = false
+            contentLayer.add(contentGroup, forKey: "layeredContentDismiss")
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            completion()
+            layer.opacity = 1.0
+            layer.removeAllAnimations()
+            layer.sublayers?.forEach { $0.removeAllAnimations() }
+        }
     }
 }
 
@@ -856,7 +1031,7 @@ enum ThemePreset: String, CaseIterable, Identifiable {
 enum WindowPresentationEffect: String, CaseIterable, Identifiable {
     case none
     case scaleFade
-    case genie
+//    case genie
     case slide
     case layered
     
@@ -866,7 +1041,7 @@ enum WindowPresentationEffect: String, CaseIterable, Identifiable {
         switch self {
         case .none: return "None"
         case .scaleFade: return "Scale & Fade"
-        case .genie: return "Genie Pull"
+//        case .genie: return "Genie Pull"
         case .slide: return "Slide & Fade"
         case .layered: return "Layered Reveal"
         }
@@ -2943,9 +3118,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func toggleWindowVisibility() {
         guard let window = ensureLyricsWindow() else { return }
+        let effect = WindowPresentationEffect.persistedValue()
         
         if window.isVisible {
-            window.orderOut(nil)
+            WindowPresentationAnimator.dismiss(window: window, effect: effect) {
+                window.orderOut(nil)
+            }
         } else {
             present(window: window, activateApp: true)
         }
