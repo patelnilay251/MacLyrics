@@ -1,0 +1,21 @@
+//
+//  LyricLine.swift
+//  LyricsForMac
+//
+//  Created by Nilay on 10/28/25.
+//
+
+import Foundation
+
+struct LyricLine: Identifiable, Codable {
+    let id: UUID
+    let time: Double
+    let text: String
+    
+    init(id: UUID = UUID(), time: Double, text: String) {
+        self.id = id
+        self.time = time
+        self.text = text
+    }
+}
+

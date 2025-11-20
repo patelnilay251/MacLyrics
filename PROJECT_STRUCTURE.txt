@@ -1,0 +1,68 @@
+LyricsForMac Project Structure (After Refactoring)
+==================================================
+
+LyricsForMac/
+│
+├── 📱 App Entry Point
+│   ├── LyricsForMacApp.swift          # SwiftUI app entry point
+│   └── ContentView.swift               # Main view (simplified - now just a typealias)
+│
+├── 📊 Models/ - Data Structures
+│   ├── LyricLine.swift                # Individual lyric with timestamp
+│   ├── Song.swift                     # Song model with lyrics & artwork
+│   ├── PlaybackInfo.swift             # Current playback state
+│   ├── LRCLIBResponse.swift           # LRCLIB API response
+│   ├── CacheStats.swift               # Cache statistics
+│   └── VisibleLyricLine.swift         # UI helper for visible lyrics
+│
+├── 🔧 Services/ - Business Logic
+│   ├── LyricsService.swift            # Fetch lyrics from LRCLIB API
+│   ├── LyricsCache.swift              # Actor-based lyrics caching
+│   └── ArtworkCache.swift             # Album artwork caching
+│
+├── 🎨 Theme/ - Visual Styling
+│   ├── ThemeMode.swift                # Theme mode (match system/manual)
+│   ├── ThemePalette.swift             # Color palette structure
+│   ├── ThemePreset.swift              # 5 themes (Desert, Glacier, Coral, Midnight, Forest)
+│   └── WindowPresentationEffect.swift # Window animation effects
+│
+├── 🛠️ Utilities/ - Helper Functions
+│   ├── Logger+Extensions.swift        # Logging categories
+│   ├── ResponsiveMetrics.swift        # Responsive layout calculations
+│   └── WindowPresentationAnimator.swift # Window animation engine
+│
+├── 🎵 Playback/ - Music Integration
+│   ├── PlaybackDetection.swift        # AppleScript-based detection (Spotify/Apple Music)
+│   └── PlaybackControl.swift          # Playback controls (play/pause/next/prev)
+│
+├── 📦 ViewModels/ - State Management
+│   ├── AppSettings.swift              # App-wide settings (@Published)
+│   ├── PlaybackNotificationHandler.swift # Track change notifications
+│   └── BrowserSwipeHandler.swift      # Swipe gesture handling
+│
+├── 🖼️ Views/ - UI Components
+│   ├── LyricsWidgetView.swift         # Main lyrics display (1,338 lines)
+│   ├── Components/
+│   │   ├── LyricLineView.swift        # Individual lyric line view
+│   │   ├── ThemeButtons.swift         # Theme selector buttons
+│   │   └── ScaleButtonStyle.swift     # Button animation style
+│   └── Helpers/
+│       └── BlurTransitionModifier.swift # Blur transition effect
+│
+└── 🪟 AppDelegate/ - Application Management
+    └── AppDelegate.swift               # Window management, hot keys (Shift+Option+L)
+
+Assets.xcassets/                        # App icons & assets
+Info.plist                              # App configuration
+LyricsForMac.entitlements               # macOS entitlements
+
+Total: 29 Swift files, ~3,500 lines of code
+Original: 1 file (ContentView.swift), 3,512 lines
+
+Key Improvements:
+✅ Modular architecture with clear separation of concerns
+✅ Easier to navigate and understand
+✅ Better for team collaboration
+✅ Improved maintainability and testability
+✅ No functionality changes - pure refactoring
+✅ All existing features preserved
