@@ -15,7 +15,10 @@ struct LyricsWidgetView: View {
     @State private var songDuration: Double = 0
     @State private var currentLineIndex = 0
     @State private var isMinimized = false
-    @State private var timer: Timer?
+    @State private var playbackPollTimer: Timer?
+    @State private var progressTimer: Timer?
+    @State private var lastSyncedPosition: Double = 0
+    @State private var lastSyncDate: Date?
     @State private var song: Song
     @State private var lastTrackTitle: String = ""
     @State private var noPlaybackDetected = false
@@ -35,6 +38,10 @@ struct LyricsWidgetView: View {
     @StateObject private var swipeHandler = BrowserSwipeHandler()
     @StateObject private var notificationHandler = PlaybackNotificationHandler()
     @Environment(\.colorScheme) private var colorScheme
+    
+    private let activePollInterval: TimeInterval = 5.0
+    private let idlePollInterval: TimeInterval = 12.0
+    private let progressTickInterval: TimeInterval = 0.5
     
     init(song: Song) {
         _song = State(initialValue: song)
@@ -189,20 +196,20 @@ struct LyricsWidgetView: View {
                 }
             }
         }
-        .onAppear {
-            // Start notification-based track change detection (instant response, zero CPU when idle)
-            notificationHandler.startListening {
-                // Immediately update when track changes
-                updateFromRealPlayback()
-            }
-            
-            // Start polling timer (reduced frequency: 1s instead of 0.2s)
-            startTimer()
-            
-            Task { await refreshCacheStats() }
-            // Show backdrop by default if artwork is available
-            if song.artwork != nil {
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)) {
+            .onAppear {
+                // Start notification-based track change detection (instant response, zero CPU when idle)
+                notificationHandler.startListening {
+                    // Immediately update when track changes
+                    updateFromRealPlayback(forceResync: true)
+                }
+                
+                // Prime state and let the playback update schedule polling cadence
+                updateFromRealPlayback(forceResync: true)
+                
+                Task { await refreshCacheStats() }
+                // Show backdrop by default if artwork is available
+                if song.artwork != nil {
+                    withAnimation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)) {
                     showArtworkBackdrop = true
                 }
             }
@@ -213,7 +220,8 @@ struct LyricsWidgetView: View {
             swipeHandler.start()
         }
         .onDisappear {
-            stopTimer()
+            stopPollingTimer()
+            stopProgressTimer()
             notificationHandler.stopListening()
             swipeHandler.stop()
         }
@@ -982,23 +990,51 @@ struct LyricsWidgetView: View {
     }
     
     
-    private func startTimer() {
-        timer?.invalidate()
+    private func startPollingTimer(interval: TimeInterval) {
+        // Avoid rebuilding the timer if the cadence matches
+        if let timer = playbackPollTimer, abs(timer.timeInterval - interval) < 0.001 {
+            return
+        }
         
-        // Optimized: Poll every 1 second instead of 0.2s (80% CPU reduction)
-        // Track changes are handled instantly via notifications
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+        stopPollingTimer()
+        
+        playbackPollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             updateFromRealPlayback()
         }
         // Add timer to common run loop modes to prevent stuttering during scrolling/interaction
-        if let timer = timer {
+        if let timer = playbackPollTimer {
             RunLoop.current.add(timer, forMode: .common)
         }
     }
     
-    private func stopTimer() {
-        timer?.invalidate()
-        timer = nil
+    private func stopPollingTimer() {
+        playbackPollTimer?.invalidate()
+        playbackPollTimer = nil
+    }
+    
+    private func startProgressTimer() {
+        guard progressTimer == nil else { return }
+        
+        progressTimer = Timer.scheduledTimer(withTimeInterval: progressTickInterval, repeats: true) { _ in
+            guard isPlaying, let syncDate = lastSyncDate else { return }
+            
+            let elapsed = Date().timeIntervalSince(syncDate)
+            let projectedTime = min(songDuration, lastSyncedPosition + elapsed)
+            
+            if currentTime != projectedTime {
+                currentTime = projectedTime
+                updateCurrentLine()
+            }
+        }
+        
+        if let progressTimer = progressTimer {
+            RunLoop.current.add(progressTimer, forMode: .common)
+        }
+    }
+    
+    private func stopProgressTimer() {
+        progressTimer?.invalidate()
+        progressTimer = nil
     }
     
     private func refreshCacheStats() async {
@@ -1242,7 +1278,7 @@ struct LyricsWidgetView: View {
     
     // MARK: - Real Playback Integration
     
-    private func updateFromRealPlayback() {
+    private func updateFromRealPlayback(forceResync: Bool = false) {
         guard let playback = getCurrentPlayback() else {
             // No playback detected
             if !noPlaybackDetected {
@@ -1251,6 +1287,10 @@ struct LyricsWidgetView: View {
             if isPlaying {
                 isPlaying = false
             }
+            lastSyncDate = nil
+            lastSyncedPosition = 0
+            stopProgressTimer()
+            startPollingTimer(interval: idlePollInterval)
             return
         }
         
@@ -1258,14 +1298,17 @@ struct LyricsWidgetView: View {
             noPlaybackDetected = false
         }
         
+        lastSyncDate = Date()
+        lastSyncedPosition = playback.position
+        
         // Conditional updates to avoid unnecessary view re-renders
-        if isPlaying != playback.isPlaying {
+        if isPlaying != playback.isPlaying || forceResync {
             isPlaying = playback.isPlaying
         }
-        if currentTime != playback.position {
+        if currentTime != playback.position || forceResync {
             currentTime = playback.position
         }
-        if songDuration != playback.duration {
+        if songDuration != playback.duration || forceResync {
             songDuration = playback.duration
         }
         
@@ -1334,5 +1377,14 @@ struct LyricsWidgetView: View {
         
         // Update current line based on real position
         updateCurrentLine()
+        
+        // Keep polling at a slower cadence and rely on local timer for smooth progress
+        if playback.isPlaying {
+            startProgressTimer()
+        } else {
+            stopProgressTimer()
+        }
+        let targetInterval = playback.isPlaying ? activePollInterval : idlePollInterval
+        startPollingTimer(interval: targetInterval)
     }
 }
