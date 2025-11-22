@@ -9,6 +9,9 @@ import Foundation
 import OSLog
 
 class LyricsService {
+    private static let lrcPattern = #"\[(\d{2}):(\d{2})\.(\d{2})\]\s*(.*)"#
+    private static let lrcRegex = try? NSRegularExpression(pattern: lrcPattern)
+    
     static func fetchLyrics(title: String, artist: String, duration: Double) async -> [LyricLine]? {
         if let cached = await LyricsCache.shared.cachedLyrics(title: title, artist: artist, duration: duration) {
             return cached
@@ -60,7 +63,10 @@ class LyricsService {
             // Try synced lyrics first (preferred)
             if let syncedLyrics = result.syncedLyrics {
                 Logger.lyrics.info("Found synced lyrics for \(title) by \(artist)")
-                let parsed = parseLRC(syncedLyrics)
+                // Offload parsing to background
+                let parsed = await Task.detached(priority: .userInitiated) {
+                    return parseLRC(syncedLyrics)
+                }.value
                 await LyricsCache.shared.store(lyrics: parsed, title: title, artist: artist, duration: duration)
                 return parsed
             }
@@ -68,7 +74,10 @@ class LyricsService {
             // Fallback to plain lyrics (no timestamps)
             if let plainLyrics = result.plainLyrics {
                 Logger.lyrics.info("Found plain lyrics (no timestamps) for \(title) by \(artist)")
-                let parsed = parsePlainLyrics(plainLyrics)
+                // Offload parsing to background
+                let parsed = await Task.detached(priority: .userInitiated) {
+                    return parsePlainLyrics(plainLyrics)
+                }.value
                 await LyricsCache.shared.store(lyrics: parsed, title: title, artist: artist, duration: duration)
                 return parsed
             }
@@ -87,12 +96,9 @@ class LyricsService {
         let lines = lrcText.components(separatedBy: .newlines)
         var parsed: [LyricLine] = []
         
-        let pattern = #"\[(\d{2}):(\d{2})\.(\d{2})\]\s*(.*)"#
-        let regex = try? NSRegularExpression(pattern: pattern)
-        
         for line in lines {
             let nsLine = line as NSString
-            if let match = regex?.firstMatch(in: line, range: NSRange(location: 0, length: nsLine.length)) {
+            if let match = lrcRegex?.firstMatch(in: line, range: NSRange(location: 0, length: nsLine.length)) {
                 let minutes = Int(nsLine.substring(with: match.range(at: 1))) ?? 0
                 let seconds = Int(nsLine.substring(with: match.range(at: 2))) ?? 0
                 let centiseconds = Int(nsLine.substring(with: match.range(at: 3))) ?? 0

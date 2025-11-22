@@ -42,19 +42,41 @@ private let appleMusicScript: NSAppleScript? = {
                 set playerPos to player position as integer
                 set trackDur to duration of current track as integer
                 set isPlaying to (player state is playing)
-                set artworkData to ""
+                set hasArtwork to "false"
+                try
+                    if exists artwork 1 of current track then
+                        set hasArtwork to "true"
+                    end if
+                on error
+                    set hasArtwork to "false"
+                end try
+                return trackName & "||||" & artistName & "||||" & playerPos & "||||" & trackDur & "||||" & isPlaying & "||||" & hasArtwork
+            end if
+        end if
+    end tell
+    return ""
+    """
+    return NSAppleScript(source: script)
+}()
+
+// Separate script to fetch Apple Music artwork on demand (only when track changes)
+private let appleMusicArtworkScript: NSAppleScript? = {
+    let script = """
+    tell application "Music"
+        if it is running then
+            if player state is playing or player state is paused then
+                set artworkPath to ""
                 try
                     if exists artwork 1 of current track then
                         set artworkPath to (path to temporary items folder as string) & "lyrics_artwork_" & (random number from 1000 to 9999) & ".jpg"
                         set artworkFile to open for access file artworkPath with write permission
                         write (data of artwork 1 of current track) to artworkFile
                         close access artworkFile
-                        set artworkData to artworkPath
+                        return artworkPath
                     end if
                 on error
-                    set artworkData to ""
+                    return ""
                 end try
-                return trackName & "||||" & artistName & "||||" & playerPos & "||||" & trackDur & "||||" & isPlaying & "||||" & artworkData
             end if
         end if
     end tell
@@ -99,7 +121,8 @@ func getAppleMusicPlayback() -> PlaybackInfo? {
     let parts = result.components(separatedBy: "||||")
     guard parts.count >= 5 else { return nil }
     
-    let artworkData = parts.count >= 6 && !parts[5].isEmpty ? parts[5] : nil
+    // parts[5] is now a boolean flag ("true"/"false") indicating artwork existence
+    // We don't fetch artwork data here anymore - it's fetched on demand
     
     return PlaybackInfo(
         title: parts[0],
@@ -108,8 +131,16 @@ func getAppleMusicPlayback() -> PlaybackInfo? {
         duration: Double(parts[3]) ?? 0,
         isPlaying: parts[4] == "true",
         artworkURL: nil,
-        artworkData: artworkData
+        artworkData: nil
     )
+}
+
+// Fetch Apple Music artwork on demand (called only when track changes)
+func getAppleMusicArtwork() -> String? {
+    var error: NSDictionary?
+    guard let script = appleMusicArtworkScript else { return nil }
+    guard let result = script.executeAndReturnError(&error).stringValue, !result.isEmpty, error == nil else { return nil }
+    return result
 }
 
 func getCurrentPlayback() -> PlaybackInfo? {

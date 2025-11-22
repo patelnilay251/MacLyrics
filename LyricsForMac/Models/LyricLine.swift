@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct LyricLine: Identifiable, Codable {
+struct LyricLine: Identifiable, Codable, Equatable {
     let id: UUID
     let time: Double
     let text: String

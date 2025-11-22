@@ -7,12 +7,19 @@
 
 import SwiftUI
 
-struct LyricLineView: View {
+struct LyricLineView: View, Equatable {
     let line: LyricLine
     let isCurrent: Bool
     let isPast: Bool
     let theme: ThemePalette
     let metrics: ResponsiveMetrics
+    
+    static func == (lhs: LyricLineView, rhs: LyricLineView) -> Bool {
+        lhs.line == rhs.line &&
+        lhs.isCurrent == rhs.isCurrent &&
+        lhs.isPast == rhs.isPast &&
+        lhs.metrics.width == rhs.metrics.width // Only check width for layout changes
+    }
     
     var body: some View {
         let baseFontSize = metrics.lyricCurrentSize
@@ -26,6 +33,7 @@ struct LyricLineView: View {
         let containerWidth = metrics.lockedLyricContainerWidth
         let lineContainerWidth: CGFloat? = containerWidth > 0 ? containerWidth : nil
         let textLayoutWidth: CGFloat? = lockedTextWidth > 0 ? lockedTextWidth / layoutScale : nil
+        
         Text(line.text)
             .font(
                 .system(
@@ -45,12 +53,13 @@ struct LyricLineView: View {
             .padding(.vertical, metrics.lyricVerticalPadding)
             .padding(.horizontal, metrics.lyricHorizontalPadding)
             .scaleEffect(resolvedScale)
-            .blur(radius: isCurrent ? 0 : metrics.lyricBlurRadius)
+            // Optimization: Removed expensive blur and simplified shadow
+            .opacity(isCurrent ? 1.0 : 0.6) // Use opacity instead of blur for non-current lines
             .shadow(
-                color: isCurrent ? theme.primaryText.opacity(0.12) : .clear,
-                radius: isCurrent ? 12 : 0,
+                color: isCurrent ? theme.primaryText.opacity(0.08) : .clear,
+                radius: isCurrent ? 4 : 0, // Reduced radius
                 x: 0,
-                y: isCurrent ? 4 : 0
+                y: isCurrent ? 2 : 0
             )
             .animation(
                 .spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1),

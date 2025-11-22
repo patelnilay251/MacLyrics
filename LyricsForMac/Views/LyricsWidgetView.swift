@@ -31,17 +31,21 @@ struct LyricsWidgetView: View {
     @State private var showSettings = false
     @State private var showArtworkBackdrop = false
     @State private var dominantColor: Color? = nil
+    @State private var blurredArtwork: NSImage? = nil
     @State private var isPinned = false
     @State private var isResizing = false
     @State private var previousSize: CGSize = .zero
+    @State private var nextLineTime: Double = 0  // Cache next line timestamp for optimization
     @StateObject private var settings = AppSettings()
     @StateObject private var swipeHandler = BrowserSwipeHandler()
     @StateObject private var notificationHandler = PlaybackNotificationHandler()
+    private let notificationDiscovery = NotificationDiscoveryLogger()
     @Environment(\.colorScheme) private var colorScheme
     
-    private let activePollInterval: TimeInterval = 5.0
-    private let idlePollInterval: TimeInterval = 12.0
-    private let progressTickInterval: TimeInterval = 0.5
+    // Notification-first architecture: polling only for safety sync
+    private let activePollInterval: TimeInterval = 60.0  // Reduced from 5s - safety sync only
+    private let idlePollInterval: TimeInterval = 120.0   // Reduced from 12s - rarely needed
+    private let progressTickInterval: TimeInterval = 1.0 // Reduced from 0.5s - 50% fewer wake-ups
     
     init(song: Song) {
         _song = State(initialValue: song)
@@ -178,12 +182,22 @@ struct LyricsWidgetView: View {
             }
             .onChange(of: song.artwork, initial: false) { _, newArtwork in
                 if let artwork = newArtwork {
-                    extractDominantColor(from: artwork)
-                    // Show backdrop by default when artwork is available
-                    if !showArtworkBackdrop {
-                        let animation = isResizing ? nil : Animation.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)
-                        withAnimation(animation) {
-                            showArtworkBackdrop = true
+                    Task {
+                        async let colorTask = ImageProcessor.shared.extractDominantColor(from: artwork)
+                        async let blurTask = ImageProcessor.shared.blurImage(artwork, radius: 28)
+                        
+                        let (color, blurred) = await (colorTask, blurTask)
+                        
+                        await MainActor.run {
+                            dominantColor = color
+                            blurredArtwork = blurred
+                            // Show backdrop by default when artwork is available
+                            if !showArtworkBackdrop {
+                                let animation = isResizing ? nil : Animation.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)
+                                withAnimation(animation) {
+                                    showArtworkBackdrop = true
+                                }
+                            }
                         }
                     }
                 }
@@ -197,6 +211,9 @@ struct LyricsWidgetView: View {
             }
         }
             .onAppear {
+                // Start notification discovery logger (debug tool)
+                notificationDiscovery.startDiscovery()
+                
                 // Start notification-based track change detection (instant response, zero CPU when idle)
                 notificationHandler.startListening {
                     // Immediately update when track changes
@@ -223,6 +240,7 @@ struct LyricsWidgetView: View {
             stopPollingTimer()
             stopProgressTimer()
             notificationHandler.stopListening()
+            notificationDiscovery.stopDiscovery()
             swipeHandler.stop()
         }
     }
@@ -1016,14 +1034,20 @@ struct LyricsWidgetView: View {
         guard progressTimer == nil else { return }
         
         progressTimer = Timer.scheduledTimer(withTimeInterval: progressTickInterval, repeats: true) { _ in
-            guard isPlaying, let syncDate = lastSyncDate else { return }
+            guard self.isPlaying, let syncDate = self.lastSyncDate else { return }
             
             let elapsed = Date().timeIntervalSince(syncDate)
-            let projectedTime = min(songDuration, lastSyncedPosition + elapsed)
+            let projectedTime = min(self.songDuration, self.lastSyncedPosition + elapsed)
             
-            if currentTime != projectedTime {
-                currentTime = projectedTime
-                updateCurrentLine()
+            // Only update if time changed significantly (avoids redundant updates)
+            if abs(self.currentTime - projectedTime) > 0.1 {
+                self.currentTime = projectedTime
+                
+                // Smart detection: only check line change if approaching next timestamp
+                // This reduces updateCurrentLine calls by ~90%
+                if projectedTime >= self.nextLineTime - 1.5 {
+                    self.updateCurrentLine()
+                }
             }
         }
         
@@ -1045,21 +1069,40 @@ struct LyricsWidgetView: View {
     }
     
     private func updateCurrentLine() {
-        // Optimized O(n) algorithm instead of O(n²)
-        // Start from the end and find the first line where currentTime >= line.time
         guard !song.lyrics.isEmpty else { return }
         
+        // Optimization: Early exit if we haven't reached next line yet
+        // This handles the most common case (playback progressing normally)
+        if currentTime < nextLineTime && currentTime >= (song.lyrics.indices.contains(currentLineIndex) ? song.lyrics[currentLineIndex].time : 0) {
+            return
+        }
+        
+        // Binary search to find the index
+        // We want the largest index i such that lyrics[i].time <= currentTime
+        var low = 0
+        var high = song.lyrics.count - 1
         var newIndex = 0
-        for i in stride(from: song.lyrics.count - 1, through: 0, by: -1) {
-            if currentTime >= song.lyrics[i].time {
-                newIndex = i
-                break
+        
+        while low <= high {
+            let mid = (low + high) / 2
+            if song.lyrics[mid].time <= currentTime {
+                newIndex = mid
+                low = mid + 1
+            } else {
+                high = mid - 1
             }
         }
         
         if newIndex != currentLineIndex {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)) {
                 currentLineIndex = newIndex
+            }
+            
+            // Cache next line time for smart detection
+            if newIndex + 1 < song.lyrics.count {
+                nextLineTime = song.lyrics[newIndex + 1].time
+            } else {
+                nextLineTime = .infinity
             }
         }
     }
@@ -1077,18 +1120,32 @@ struct LyricsWidgetView: View {
         GeometryReader { geometry in
             ZStack {
                 // Blurred artwork background - optimized blur and edge handling
-                Image(nsImage: artwork)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    // Extend beyond bounds to prevent edge artifacts
-                    .frame(
-                        width: geometry.size.width + 100,
-                        height: geometry.size.height + 100
-                    )
-                    .blur(radius: 28) // Reduced from 40 for better performance
-                    .scaleEffect(1.15) // Increased slightly for better edge coverage
-                    .offset(x: 0, y: 0) // Center the extended image
-                    .clipped()
+                if let blurred = blurredArtwork {
+                    Image(nsImage: blurred)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        // Extend beyond bounds to prevent edge artifacts
+                        .frame(
+                            width: geometry.size.width + 100,
+                            height: geometry.size.height + 100
+                        )
+                        .scaleEffect(1.15) // Increased slightly for better edge coverage
+                        .offset(x: 0, y: 0) // Center the extended image
+                        .clipped()
+                } else if let artwork = song.artwork {
+                    // Fallback to real-time blur if pre-blur isn't ready yet
+                    Image(nsImage: artwork)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(
+                            width: geometry.size.width + 100,
+                            height: geometry.size.height + 100
+                        )
+                        .blur(radius: 28)
+                        .scaleEffect(1.15)
+                        .offset(x: 0, y: 0)
+                        .clipped()
+                }
                 
                 // Color overlay
                 if let dominantColor = dominantColor {
@@ -1115,105 +1172,21 @@ struct LyricsWidgetView: View {
             .clipped() // Ensure content doesn't overflow
         }
         .onAppear {
-            extractDominantColor(from: artwork)
-        }
-    }
-    
-    private func extractDominantColor(from image: NSImage) {
-        Task {
-            guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-                return
-            }
-            
-            // Resize image for faster processing
-            let width = min(100, cgImage.width)
-            let height = min(100, cgImage.height)
-            
-            guard let resizedCGImage = resizeCGImage(cgImage, width: width, height: height) else {
-                return
-            }
-            
-            // Extract pixel data
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            let bytesPerPixel = 4
-            let bytesPerRow = bytesPerPixel * width
-            let bitsPerComponent = 8
-            
-            var pixelData = [UInt8](repeating: 0, count: width * height * bytesPerPixel)
-            
-            guard let context = CGContext(
-                data: &pixelData,
-                width: width,
-                height: height,
-                bitsPerComponent: bitsPerComponent,
-                bytesPerRow: bytesPerRow,
-                space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
-            ) else {
-                return
-            }
-            
-            context.draw(resizedCGImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-            
-            // Calculate average color
-            var r: CGFloat = 0
-            var g: CGFloat = 0
-            var b: CGFloat = 0
-            var count: CGFloat = 0
-            
-            for i in stride(from: 0, to: pixelData.count, by: bytesPerPixel) {
-                let red = CGFloat(pixelData[i]) / 255.0
-                let green = CGFloat(pixelData[i + 1]) / 255.0
-                let blue = CGFloat(pixelData[i + 2]) / 255.0
+            Task {
+                async let colorTask = ImageProcessor.shared.extractDominantColor(from: artwork)
+                async let blurTask = ImageProcessor.shared.blurImage(artwork, radius: 28)
                 
-                // Skip very dark or very light pixels
-                let brightness = (red + green + blue) / 3.0
-                if brightness > 0.1 && brightness < 0.9 {
-                    r += red
-                    g += green
-                    b += blue
-                    count += 1
+                let (color, blurred) = await (colorTask, blurTask)
+                
+                await MainActor.run {
+                    dominantColor = color
+                    blurredArtwork = blurred
                 }
             }
-            
-            guard count > 0 else { return }
-            
-            r /= count
-            g /= count
-            b /= count
-            
-            // Enhance saturation slightly
-            let saturationBoost: CGFloat = 1.2
-            let maxComponent = max(r, g, b)
-            if maxComponent > 0 {
-                r = min(1.0, r * saturationBoost)
-                g = min(1.0, g * saturationBoost)
-                b = min(1.0, b * saturationBoost)
-            }
-            
-            await MainActor.run {
-                dominantColor = Color(red: Double(r), green: Double(g), blue: Double(b))
-            }
         }
     }
     
-    private func resizeCGImage(_ image: CGImage, width: Int, height: Int) -> CGImage? {
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: width * 4,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
-        )
-        
-        context?.interpolationQuality = .low
-        context?.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
-        return context?.makeImage()
-    }
+
     
     // MARK: - Artwork Loading
     
@@ -1223,18 +1196,19 @@ struct LyricsWidgetView: View {
             return cached
         }
         
-        // Try Apple Music artwork data
-        if let artworkData = playback.artworkData, !artworkData.isEmpty {
-            if let image = convertAppleMusicArtwork(artworkData) {
+        // Try Spotify artwork URL first (already async, no disk I/O)
+        if let artworkURL = playback.artworkURL, !artworkURL.isEmpty,
+           let url = URL(string: artworkURL) {
+            if let image = await downloadArtwork(from: url) {
                 ArtworkCache.shared.set(image, title: playback.title, artist: playback.artist)
                 return image
             }
         }
         
-        // Try Spotify artwork URL
-        if let artworkURL = playback.artworkURL, !artworkURL.isEmpty,
-           let url = URL(string: artworkURL) {
-            if let image = await downloadArtwork(from: url) {
+        // For Apple Music, fetch artwork on-demand (only called on track change)
+        // This prevents unnecessary file I/O on every poll
+        if let artworkPath = getAppleMusicArtwork(), !artworkPath.isEmpty {
+            if let image = convertAppleMusicArtwork(artworkPath) {
                 ArtworkCache.shared.set(image, title: playback.title, artist: playback.artist)
                 return image
             }
@@ -1278,6 +1252,11 @@ struct LyricsWidgetView: View {
     
     // MARK: - Real Playback Integration
     
+    /// Updates playback state from AppleScript
+    /// - In notification-first architecture, this is called:
+    ///   1. On track change notifications (instant, via notificationHandler)
+    ///   2. Every 60s as safety sync (to catch drift, manual seeking, etc.)
+    /// - Position updates use local interpolation via progressTimer
     private func updateFromRealPlayback(forceResync: Bool = false) {
         guard let playback = getCurrentPlayback() else {
             // No playback detected
@@ -1312,7 +1291,8 @@ struct LyricsWidgetView: View {
             songDuration = playback.duration
         }
         
-        // Track change detection
+        // Track change detection (notifications handle this instantly in most cases)
+        // This polling-based detection is just a safety fallback
         if playback.title != lastTrackTitle && !playback.title.isEmpty {
             lastTrackTitle = playback.title
             
@@ -1322,6 +1302,9 @@ struct LyricsWidgetView: View {
             withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)) {
                 currentLineIndex = 0
             }
+            
+            // Initialize next line time cache for smart detection
+            nextLineTime = 0
             
             // Update song info and fetch lyrics
             withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)) {
@@ -1378,7 +1361,7 @@ struct LyricsWidgetView: View {
         // Update current line based on real position
         updateCurrentLine()
         
-        // Keep polling at a slower cadence and rely on local timer for smooth progress
+        // Position interpolation: local timer handles smooth progress, polling just syncs
         if playback.isPlaying {
             startProgressTimer()
         } else {

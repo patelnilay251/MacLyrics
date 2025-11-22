@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct VisibleLyricLine: Identifiable {
+struct VisibleLyricLine: Identifiable, Equatable {
     let line: LyricLine
     let index: Int
     
