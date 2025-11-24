@@ -15,12 +15,12 @@ class NotificationDiscoveryLogger {
     private var discoveredNotifications: Set<String> = []
     
     // Enable/disable discovery logging (set to false in production)
-    static let isEnabled = true
+    static let isEnabled = false
     
     func startDiscovery() {
         guard Self.isEnabled else { return }
         
-        print("🔍 Started notification discovery logger")
+        // Logging removed
         
         // Listen to ALL distributed notifications
         observer = DistributedNotificationCenter.default().addObserver(
@@ -37,13 +37,13 @@ class NotificationDiscoveryLogger {
             DistributedNotificationCenter.default().removeObserver(observer)
             self.observer = nil
         }
-        print("🔍 Stopped notification discovery logger")
+        // Logging removed
         
         // Print summary of discovered notifications
         if !discoveredNotifications.isEmpty {
-            print("📊 Discovery Summary: Found \(self.discoveredNotifications.count) unique music notifications")
+            // Logging removed
             for name in discoveredNotifications.sorted() {
-                print("   - \(name)")
+                // Logging removed
             }
         }
     }
@@ -52,7 +52,7 @@ class NotificationDiscoveryLogger {
         let name = notification.name.rawValue
         
         // DEBUG: Log EVERY notification first to see what we're getting
-        print("🔔 DEBUG: Received notification: \(name)")
+        // Logging removed
         
         // Filter for music-related notifications
         let isMusicRelated = name.lowercased().contains("spotify") ||
@@ -62,7 +62,7 @@ class NotificationDiscoveryLogger {
                             name.contains("com.spotify") ||
                             name.contains("com.apple")
         
-        print("🔔 DEBUG: isMusicRelated = \(isMusicRelated)")
+        // Logging removed
         
         guard isMusicRelated else { return }
         
@@ -70,10 +70,10 @@ class NotificationDiscoveryLogger {
         let isNewDiscovery = discoveredNotifications.insert(name).inserted
         
         // Log notification details
-        print("📻 \(isNewDiscovery ? "[NEW] " : "")\(name)")
+        // Logging removed
         
         if let userInfo = notification.userInfo, !userInfo.isEmpty {
-            print("   UserInfo keys: \(userInfo.keys.map { String(describing: $0) }.joined(separator: ", "))")
+            // Logging removed
             
             // Log actual values for important keys
             let importantKeys = ["Name", "Artist", "Album", "Position", "Duration", 
@@ -81,7 +81,7 @@ class NotificationDiscoveryLogger {
             
             for key in importantKeys {
                 if let value = userInfo[key] {
-                    print("   \(key): \(String(describing: value))")
+                    // Logging removed
                 }
             }
             
@@ -90,18 +90,18 @@ class NotificationDiscoveryLogger {
                 !importantKeys.contains(String(describing: key))
             }
             if !otherKeys.isEmpty {
-                print("   Other keys: \(otherKeys.map { String(describing: $0) }.joined(separator: ", "))")
+                // Logging removed
             }
         } else {
-            print("   UserInfo: (empty)")
+            // Logging removed
         }
         
         if let object = notification.object {
-            print("   Object: \(String(describing: object))")
+            // Logging removed
         } else {
-            print("   Object: (nil)")
+            // Logging removed
         }
-        print("---")
+        // Logging removed
     }
     
     deinit {

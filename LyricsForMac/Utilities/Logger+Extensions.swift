@@ -9,11 +9,11 @@ import Foundation
 import OSLog
 
 extension Logger {
-    private static var subsystem = Bundle.main.bundleIdentifier ?? "com.quickflow.LyricsForMac"
-    
-    static let lyrics = Logger(subsystem: subsystem, category: "lyrics")
-    static let playback = Logger(subsystem: subsystem, category: "playback")
-    static let artwork = Logger(subsystem: subsystem, category: "artwork")
-    static let hotkey = Logger(subsystem: subsystem, category: "hotkey")
-}
+    // Route all logger instances to the disabled OSLog sink to silence logging globally.
+    private static let disabledLogger = Logger(OSLog.disabled)
 
+    static let lyrics = disabledLogger
+    static let playback = disabledLogger
+    static let artwork = disabledLogger
+    static let hotkey = disabledLogger
+}

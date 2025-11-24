@@ -9,8 +9,8 @@ import Foundation
 import OSLog
 
 class LyricsService {
-    private static let lrcPattern = #"\[(\d{2}):(\d{2})\.(\d{2})\]\s*(.*)"#
-    private static let lrcRegex = try? NSRegularExpression(pattern: lrcPattern)
+    private nonisolated static let lrcPattern = #"\[(\d{2}):(\d{2})\.(\d{2})\]\s*(.*)"#
+    private nonisolated static let lrcRegex = try? NSRegularExpression(pattern: lrcPattern)
     
     static func fetchLyrics(title: String, artist: String, duration: Double) async -> [LyricLine]? {
         if let cached = await LyricsCache.shared.cachedLyrics(title: title, artist: artist, duration: duration) {
@@ -26,7 +26,7 @@ class LyricsService {
         ]
         
         guard let url = components.url else {
-            Logger.lyrics.error("Invalid URL for lyrics request")
+            // Logging removed
             return nil
         }
         
@@ -37,17 +37,17 @@ class LyricsService {
             let (data, response) = try await URLSession.shared.data(for: request)
             
             guard let httpResponse = response as? HTTPURLResponse else {
-                Logger.lyrics.error("Invalid HTTP response")
+                // Logging removed
                 return nil
             }
             
             if httpResponse.statusCode == 404 {
-                Logger.lyrics.info("Lyrics not found in LRCLIB database for \(title) by \(artist)")
+                // Logging removed
                 return nil
             }
             
             guard httpResponse.statusCode == 200 else {
-                Logger.lyrics.error("API returned status code: \(httpResponse.statusCode)")
+                // Logging removed
                 return nil
             }
             
@@ -55,14 +55,14 @@ class LyricsService {
             
             // Check if instrumental
             if result.instrumental == true {
-                Logger.lyrics.info("Track is instrumental (no lyrics): \(title) by \(artist)")
+                // Logging removed
                 await LyricsCache.shared.store(lyrics: [], title: title, artist: artist, duration: duration)
                 return []
             }
             
             // Try synced lyrics first (preferred)
             if let syncedLyrics = result.syncedLyrics {
-                Logger.lyrics.info("Found synced lyrics for \(title) by \(artist)")
+                // Logging removed
                 // Offload parsing to background
                 let parsed = await Task.detached(priority: .userInitiated) {
                     return parseLRC(syncedLyrics)
@@ -73,7 +73,7 @@ class LyricsService {
             
             // Fallback to plain lyrics (no timestamps)
             if let plainLyrics = result.plainLyrics {
-                Logger.lyrics.info("Found plain lyrics (no timestamps) for \(title) by \(artist)")
+                // Logging removed
                 // Offload parsing to background
                 let parsed = await Task.detached(priority: .userInitiated) {
                     return parsePlainLyrics(plainLyrics)
@@ -82,17 +82,17 @@ class LyricsService {
                 return parsed
             }
             
-            Logger.lyrics.info("No lyrics available for \(title) by \(artist)")
+            // Logging removed
             return nil
             
         } catch {
-            Logger.lyrics.error("Error fetching lyrics: \(error.localizedDescription)")
+            // Logging removed
             return nil
         }
     }
     
     // Parse LRC format: [00:17.12] lyrics text
-    static func parseLRC(_ lrcText: String) -> [LyricLine] {
+    nonisolated static func parseLRC(_ lrcText: String) -> [LyricLine] {
         let lines = lrcText.components(separatedBy: .newlines)
         var parsed: [LyricLine] = []
         
@@ -116,7 +116,7 @@ class LyricsService {
     }
     
     // Parse plain lyrics (split by lines, estimate timestamps)
-    static func parsePlainLyrics(_ plainText: String) -> [LyricLine] {
+    nonisolated static func parsePlainLyrics(_ plainText: String) -> [LyricLine] {
         let lines = plainText.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
@@ -127,4 +127,3 @@ class LyricsService {
         }
     }
 }
-

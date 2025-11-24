@@ -1245,7 +1245,7 @@ struct LyricsWidgetView: View {
             let (data, _) = try await URLSession.shared.data(from: url)
             return NSImage(data: data)
         } catch {
-            Logger.artwork.error("Failed to download artwork: \(error.localizedDescription)")
+            // Logging removed
             return nil
         }
     }
@@ -1296,7 +1296,7 @@ struct LyricsWidgetView: View {
         if playback.title != lastTrackTitle && !playback.title.isEmpty {
             lastTrackTitle = playback.title
             
-            Logger.playback.info("Track changed to: \(playback.title) by \(playback.artist)")
+            // Logging removed
             
             // Reset current line index when track changes
             withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)) {

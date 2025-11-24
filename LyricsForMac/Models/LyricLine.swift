@@ -12,10 +12,9 @@ struct LyricLine: Identifiable, Codable, Equatable {
     let time: Double
     let text: String
     
-    init(id: UUID = UUID(), time: Double, text: String) {
+    nonisolated init(id: UUID = UUID(), time: Double, text: String) {
         self.id = id
         self.time = time
         self.text = text
     }
 }
-
