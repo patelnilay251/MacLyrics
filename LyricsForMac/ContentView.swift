@@ -1428,12 +1428,32 @@ struct ResponsiveMetrics {
 class AppSettings: ObservableObject {
     private let cachingEnabledKey = "LyricsCacheEnabled"
     private let presentationEffectKey = WindowPresentationEffect.storageKey
+    private let windowOpacityKey = "LyricsWindowOpacity"
+    private let cornerRadiusKey = "LyricsCornerRadius"
+    private let manualThemeKey = "LyricsManualTheme"
+    private let fontScaleKey = "LyricsFontScale"
     
-    @Published var windowOpacity: Double = 1.0
-    @Published var cornerRadius: Double = 16.0
+    @Published var windowOpacity: Double {
+        didSet {
+            UserDefaults.standard.set(windowOpacity, forKey: windowOpacityKey)
+        }
+    }
+    @Published var cornerRadius: Double {
+        didSet {
+            UserDefaults.standard.set(cornerRadius, forKey: cornerRadiusKey)
+        }
+    }
     @Published var themeMode: ThemeMode = .matchSystem
-    @Published var manualTheme: ThemePreset = .midnight
-    @Published var fontScale: Double = 0.8
+    @Published var manualTheme: ThemePreset {
+        didSet {
+            UserDefaults.standard.set(manualTheme.rawValue, forKey: manualThemeKey)
+        }
+    }
+    @Published var fontScale: Double {
+        didSet {
+            UserDefaults.standard.set(fontScale, forKey: fontScaleKey)
+        }
+    }
     @Published var presentationEffect: WindowPresentationEffect {
         didSet {
             WindowPresentationEffect.persist(presentationEffect)
@@ -1450,13 +1470,28 @@ class AppSettings: ObservableObject {
     @Published var cacheStats: CacheStats = .empty
     
     init() {
-        let stored = UserDefaults.standard.object(forKey: cachingEnabledKey) as? Bool ?? true
-        _cachingEnabled = Published(initialValue: stored)
+        // Load persisted values with defaults
+        let storedOpacity = UserDefaults.standard.object(forKey: windowOpacityKey) as? Double ?? 1.0
+        _windowOpacity = Published(initialValue: storedOpacity)
+        
+        let storedCornerRadius = UserDefaults.standard.object(forKey: cornerRadiusKey) as? Double ?? 16.0
+        _cornerRadius = Published(initialValue: storedCornerRadius)
+        
+        let storedThemeRaw = UserDefaults.standard.string(forKey: manualThemeKey) ?? ThemePreset.midnight.rawValue
+        let storedTheme = ThemePreset(rawValue: storedThemeRaw) ?? .midnight
+        _manualTheme = Published(initialValue: storedTheme)
+        
+        let storedFontScale = UserDefaults.standard.object(forKey: fontScaleKey) as? Double ?? 0.8
+        _fontScale = Published(initialValue: storedFontScale)
+        
+        let storedCaching = UserDefaults.standard.object(forKey: cachingEnabledKey) as? Bool ?? true
+        _cachingEnabled = Published(initialValue: storedCaching)
+        
         let storedEffect = WindowPresentationEffect.persistedValue()
         _presentationEffect = Published(initialValue: storedEffect)
         
         Task {
-            await LyricsCache.shared.setEnabled(stored)
+            await LyricsCache.shared.setEnabled(storedCaching)
         }
     }
     
