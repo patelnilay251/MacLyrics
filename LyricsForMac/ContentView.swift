@@ -1501,7 +1501,7 @@ struct LyricsWidgetView: View {
     @State private var isResizing = false
     @State private var previousSize: CGSize = .zero
     @StateObject private var settings = AppSettings()
-    @StateObject private var swipeHandler = BrowserSwipeHandler()
+    @StateObject private var swipeHandler = BrowserSwipeHandler.shared
     @Environment(\.colorScheme) private var colorScheme
     
     init(song: Song) {
@@ -1670,11 +1670,11 @@ struct LyricsWidgetView: View {
                 onPrevious: { previousTrack() },
                 onNext: { nextTrack() }
             )
-            swipeHandler.start()
+            // Note: swipeHandler.start() is called by AppDelegate when window is shown
         }
         .onDisappear {
             stopTimer()
-            swipeHandler.stop()
+            // Note: swipeHandler.stop() is called by AppDelegate when window is hidden
         }
     }
     }
@@ -2984,6 +2984,8 @@ struct ScaleButtonStyle: ButtonStyle {
 // MARK: - Browser-Style Swipe Handler
 
 final class BrowserSwipeHandler: ObservableObject {
+    static let shared = BrowserSwipeHandler()
+    
     private enum Constants {
         static let triggerThreshold: CGFloat = 85
     }
@@ -3274,6 +3276,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let effect = WindowPresentationEffect.persistedValue()
         
         if window.isVisible {
+            BrowserSwipeHandler.shared.stop()
             WindowPresentationAnimator.dismiss(window: window, effect: effect) {
                 window.orderOut(nil)
             }
@@ -3301,6 +3304,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.orderFrontRegardless()
         let effect = WindowPresentationEffect.persistedValue()
         WindowPresentationAnimator.animate(window: window, effect: effect)
+        BrowserSwipeHandler.shared.start()
     }
     
     // MARK: - Hot Keys
