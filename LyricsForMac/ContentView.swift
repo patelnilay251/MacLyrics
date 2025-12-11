@@ -2443,11 +2443,11 @@ struct LyricsWidgetView: View {
     
     // MARK: - Timer Management
     
-    private func startTimer() {
+    /// Adaptive polling: 500ms during playback, 2s when idle to save CPU
+    private func startTimer(interval: TimeInterval = 0.5) {
         timer?.invalidate()
         
-        // Simple 500ms timer - polls and updates in one go
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             updateFromRealPlayback()
         }
         
@@ -2719,12 +2719,16 @@ struct LyricsWidgetView: View {
             if !noPlaybackDetected {
                 noPlaybackDetected = true
                 isPlaying = false
+                // Switch to slow polling when idle (2s)
+                startTimer(interval: 2.0)
             }
             return
         }
         
         if noPlaybackDetected {
             noPlaybackDetected = false
+            // Switch back to fast polling when playback detected (500ms)
+            startTimer(interval: 0.5)
         }
         
         // Update play state only if changed
