@@ -1192,7 +1192,6 @@ enum WindowPresentationEffect: String, CaseIterable, Identifiable {
 struct ResponsiveMetrics {
     let size: CGSize
     let fontScale: Double
-    let isMinimized: Bool
     
     var width: CGFloat { size.width }
     var height: CGFloat { size.height }
@@ -1252,7 +1251,6 @@ struct ResponsiveMetrics {
     }
     
     var headerHeight: CGFloat {
-        if isMinimized { return 48 }
         // Actual header height for overlay positioning
         return interpolate(compact: 56, medium: 60, wide: 64)
     }
@@ -1283,7 +1281,6 @@ struct ResponsiveMetrics {
     }
     
     var contentHorizontalPadding: CGFloat {
-        if isMinimized { return 18 }
         // Percentage-based with breakpoint adjustments
         let basePadding = width * 0.04
         if isVeryCompactWidth {
@@ -1319,8 +1316,7 @@ struct ResponsiveMetrics {
     
     var lyricCurrentSize: CGFloat {
         let base: CGFloat
-        if isMinimized { base = 26 }
-        else if isVeryCompactWidth { base = 26 }
+        if isVeryCompactWidth { base = 26 }
         else if isCompactWidth { base = 28 }
         else if isWideWidth { base = 36 }
         else { base = 32 }
@@ -1329,16 +1325,14 @@ struct ResponsiveMetrics {
     
     var lyricSecondarySize: CGFloat {
         let base: CGFloat
-        if isMinimized { base = 16 }
-        else if isVeryCompactWidth { base = 16 }
+        if isVeryCompactWidth { base = 16 }
         else if isCompactWidth { base = 18 }
         else { base = 20 }
         return base * effectiveFontScale
     }
     
     var lyricVerticalPadding: CGFloat {
-        if isMinimized { return 10 }
-        return interpolate(compact: 12, medium: 14, wide: 16)
+        interpolate(compact: 12, medium: 14, wide: 16)
     }
     
     var lyricHorizontalPadding: CGFloat {
@@ -1367,11 +1361,11 @@ struct ResponsiveMetrics {
     }
     
     var lyricCurrentScale: CGFloat {
-        isMinimized ? 1.03 : 1.05
+        1.05
     }
     
     var lyricSecondaryScale: CGFloat {
-        isMinimized ? 0.96 : 0.92
+        0.92
     }
     
     var lyricBlurRadius: CGFloat {
@@ -1518,15 +1512,12 @@ struct LyricsWidgetView: View {
     @State private var currentTime: Double = 0
     @State private var songDuration: Double = 0
     @State private var currentLineIndex = 0
-    @State private var isMinimized = false
     @State private var timer: Timer?
     @State private var song: Song
     @State private var lastTrackID: String = ""  // "title|artist" for robust track detection
     @State private var noPlaybackDetected = false
     @State private var isLoadingLyrics = false
     @State private var lyricsError: String? = nil
-    @State private var pendingSongTitle: String? = nil
-    @State private var pendingSongArtist: String? = nil
     @State private var isHovering = false
     @State private var isPointerInside = false
     @State private var showSettings = false
@@ -1595,8 +1586,7 @@ struct LyricsWidgetView: View {
         GeometryReader { proxy in
             let metrics = ResponsiveMetrics(
                 size: proxy.size,
-                fontScale: settings.fontScale,
-                isMinimized: isMinimized
+                fontScale: settings.fontScale
             )
             
             // Detect resize
@@ -2164,13 +2154,7 @@ struct LyricsWidgetView: View {
         return 0.4 + (sin(time * 1.6) + 1.0) * 0.25
     }
     
-    private func sanitizedDisplayString(_ value: String?) -> String? {
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
-            return nil
-        }
-        return value
-    }
-    
+
     private func placeholderView(systemImage: String, message: String, metrics: ResponsiveMetrics) -> some View {
         VStack(spacing: 12) {
             Image(systemName: systemImage)
