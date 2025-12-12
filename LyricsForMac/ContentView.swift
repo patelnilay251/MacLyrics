@@ -1524,6 +1524,7 @@ struct LyricsWidgetView: View {
     @State private var showSettings = false
     @State private var showArtworkBackdrop = false
     @State private var dominantColor: Color? = nil
+    @State private var blurredBackdropImage: NSImage? = nil
     @State private var isPinned = false
     @State private var isResizing = false
     @State private var previousSize: CGSize = .zero
@@ -1664,6 +1665,8 @@ struct LyricsWidgetView: View {
             .onChange(of: song.artwork, initial: false) { _, newArtwork in
                 if let artwork = newArtwork {
                     extractDominantColor(from: artwork)
+                    // Pre-compute blurred backdrop image
+                    blurredBackdropImage = precomputeBlurredBackdrop(from: artwork)
                     // Show backdrop by default when artwork is available
                     if !showArtworkBackdrop {
                         let animation = isResizing ? nil : Animation.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)
@@ -2526,19 +2529,31 @@ struct LyricsWidgetView: View {
     private func artworkBackdropView(artwork: NSImage, metrics: ResponsiveMetrics) -> some View {
         GeometryReader { geometry in
             ZStack {
-                // Blurred artwork background - optimized blur and edge handling
-                Image(nsImage: artwork)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    // Extend beyond bounds to prevent edge artifacts
-                    .frame(
-                        width: geometry.size.width + 100,
-                        height: geometry.size.height + 100
-                    )
-                    .blur(radius: 28) // Reduced from 40 for better performance
-                    .scaleEffect(1.15) // Increased slightly for better edge coverage
-                    .offset(x: 0, y: 0) // Center the extended image
-                    .clipped()
+                // Pre-computed blurred artwork background
+                if let blurredImage = blurredBackdropImage {
+                    Image(nsImage: blurredImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        // Extend beyond bounds to prevent edge artifacts
+                        .frame(
+                            width: geometry.size.width + 100,
+                            height: geometry.size.height + 100
+                        )
+                        .scaleEffect(1.15) // For better edge coverage
+                        .offset(x: 0, y: 0) // Center the extended image
+                        .clipped()
+                } else {
+                    // Fallback: display original artwork while blur is computing
+                    Image(nsImage: artwork)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(
+                            width: geometry.size.width + 100,
+                            height: geometry.size.height + 100
+                        )
+                        .scaleEffect(1.15)
+                        .clipped()
+                }
                 
                 // Color overlay
                 if let dominantColor = dominantColor {
@@ -2566,7 +2581,40 @@ struct LyricsWidgetView: View {
         }
         .onAppear {
             extractDominantColor(from: artwork)
+            // Compute blurred backdrop if not already done
+            if blurredBackdropImage == nil {
+                blurredBackdropImage = precomputeBlurredBackdrop(from: artwork)
+            }
         }
+    }
+    
+    private func precomputeBlurredBackdrop(from image: NSImage) -> NSImage {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return image
+        }
+        
+        let ciImage = CIImage(cgImage: cgImage)
+        
+        guard let blurFilter = CIFilter(name: "CIGaussianBlur") else {
+            return image
+        }
+        
+        blurFilter.setValue(ciImage, forKey: kCIInputImageKey)
+        blurFilter.setValue(28.0, forKey: kCIInputRadiusKey)
+        
+        guard let outputImage = blurFilter.outputImage else {
+            return image
+        }
+        
+        // CIGaussianBlur extends the image bounds, so we need to crop back to original size
+        let croppedImage = outputImage.cropped(to: ciImage.extent)
+        
+        let context = CIContext(options: [.useSoftwareRenderer: false])
+        guard let outputCGImage = context.createCGImage(croppedImage, from: croppedImage.extent) else {
+            return image
+        }
+        
+        return NSImage(cgImage: outputCGImage, size: image.size)
     }
     
     private func extractDominantColor(from image: NSImage) {
