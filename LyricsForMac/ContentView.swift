@@ -1516,6 +1516,7 @@ struct LyricsWidgetView: View {
     @State private var song: Song
     @State private var lastTrackID: String = ""  // "title|artist" for robust track detection
     @State private var noPlaybackDetected = false
+    @State private var playbackTaskID: UUID = UUID()  // Used to discard stale playback updates
     @State private var isLoadingLyrics = false
     @State private var lyricsError: String? = nil
     @State private var isHovering = false
@@ -2730,45 +2731,60 @@ struct LyricsWidgetView: View {
     // MARK: - Real Playback Integration
     
     private func updateFromRealPlayback() {
-        guard let playback = getCurrentPlayback() else {
-            if !noPlaybackDetected {
-                noPlaybackDetected = true
-                isPlaying = false
-                // Switch to slow polling when idle (2s)
-                startTimer(interval: 2.0)
-            }
-            return
-        }
+        // Generate a unique ID for this polling iteration to handle overlapping tasks
+        let taskID = UUID()
+        playbackTaskID = taskID
         
-        if noPlaybackDetected {
-            noPlaybackDetected = false
-            // Switch back to fast polling when playback detected (500ms)
-            startTimer(interval: 0.5)
-        }
-        
-        // Update play state only if changed
-        if isPlaying != playback.isPlaying {
-            isPlaying = playback.isPlaying
-        }
-        
-        // Update duration only if changed significantly
-        if abs(songDuration - playback.duration) > 1.0 {
-            songDuration = playback.duration
-        }
-        
-        // Update time only if changed by at least 0.5 seconds
-        // This prevents flickering from tiny changes
-        if abs(currentTime - playback.position) > 0.5 {
-            currentTime = playback.position
+        // Run AppleScript execution on a background thread to avoid blocking main thread
+        Task.detached(priority: .userInitiated) {
+            let playback = getCurrentPlayback()
             
-            // Only check line changes when time actually updated
-            updateCurrentLine()
-        }
-        
-        // Track change detection using "title|artist" for robustness
-        let trackID = "\(playback.title)|\(playback.artist)"
-        if trackID != lastTrackID && !playback.title.isEmpty {
-            handleTrackChange(playback: playback, trackID: trackID)
+            // Update UI state on MainActor
+            await MainActor.run {
+                // Discard stale results if a newer task has started
+                guard taskID == playbackTaskID else { return }
+                
+                guard let playback = playback else {
+                    if !noPlaybackDetected {
+                        noPlaybackDetected = true
+                        isPlaying = false
+                        // Switch to slow polling when idle (2s)
+                        startTimer(interval: 2.0)
+                    }
+                    return
+                }
+                
+                if noPlaybackDetected {
+                    noPlaybackDetected = false
+                    // Switch back to fast polling when playback detected (500ms)
+                    startTimer(interval: 0.5)
+                }
+                
+                // Update play state only if changed
+                if isPlaying != playback.isPlaying {
+                    isPlaying = playback.isPlaying
+                }
+                
+                // Update duration only if changed significantly
+                if abs(songDuration - playback.duration) > 1.0 {
+                    songDuration = playback.duration
+                }
+                
+                // Update time only if changed by at least 0.5 seconds
+                // This prevents flickering from tiny changes
+                if abs(currentTime - playback.position) > 0.5 {
+                    currentTime = playback.position
+                    
+                    // Only check line changes when time actually updated
+                    updateCurrentLine()
+                }
+                
+                // Track change detection using "title|artist" for robustness
+                let trackID = "\(playback.title)|\(playback.artist)"
+                if trackID != lastTrackID && !playback.title.isEmpty {
+                    handleTrackChange(playback: playback, trackID: trackID)
+                }
+            }
         }
     }
     
