@@ -1656,10 +1656,8 @@ struct LyricsWidgetView: View {
                     // When pinned, always show
                     isHovering = true
                 } else if !isResizing {
-                    // Update hover state with animation
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
-                        isHovering = hovering || showSettings
-                    }
+                    // View has .animation(value: isHovering) - no withAnimation needed
+                    isHovering = hovering || showSettings
                 }
             }
             .onChange(of: currentSize) { oldSize, newSize in
@@ -1687,9 +1685,8 @@ struct LyricsWidgetView: View {
             .animation(isResizing ? nil : .spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15), value: song.artwork)
         .onChange(of: showSettings, initial: false) { _, newValue in
             if !isPinned && !isResizing {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
-                    isHovering = newValue || isPointerInside
-                }
+                // View has .animation(value: isHovering) - no withAnimation needed
+                isHovering = newValue || isPointerInside
             }
         }
         .onAppear {
@@ -2527,9 +2524,8 @@ struct LyricsWidgetView: View {
         let newIndex = max(0, low - 1)
         
         if newIndex != currentLineIndex {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)) {
-                currentLineIndex = newIndex
-            }
+            // View has .animation(value: currentLineIndex) - no withAnimation needed
+            currentLineIndex = newIndex
         }
     }
     
@@ -2797,11 +2793,13 @@ struct LyricsWidgetView: View {
         lastTrackID = trackID
         Logger.playback.info("Track changed to: \(playback.title) by \(playback.artist)")
         
-        withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)) {
-            currentLineIndex = 0
-            isLoadingLyrics = true
-            lyricsError = nil
-        }
+        // Views have .animation() modifiers for these state changes:
+        // - currentLineIndex: .animation(value: currentLineIndex)
+        // - song.title: .animation(value: song.title)
+        // - lyricsStatusKey: .animation(value: lyricsStatusKey) (depends on isLoadingLyrics, lyricsError)
+        currentLineIndex = 0
+        isLoadingLyrics = true
+        lyricsError = nil
         
         Task {
             let artwork = await loadArtwork(from: playback)
@@ -2812,26 +2810,24 @@ struct LyricsWidgetView: View {
             )
             
             await MainActor.run {
-                withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)) {
-                    if let lyrics = fetchedLyrics {
-                        lyricsError = lyrics.isEmpty ? "Instrumental track" : nil
-                        song = Song(
-                            title: playback.title,
-                            artist: playback.artist,
-                            lyrics: lyrics,
-                            artwork: artwork
-                        )
-                    } else {
-                        lyricsError = "Lyrics not found"
-                        song = Song(
-                            title: playback.title,
-                            artist: playback.artist,
-                            lyrics: [],
-                            artwork: artwork
-                        )
-                    }
-                    isLoadingLyrics = false
+                if let lyrics = fetchedLyrics {
+                    lyricsError = lyrics.isEmpty ? "Instrumental track" : nil
+                    song = Song(
+                        title: playback.title,
+                        artist: playback.artist,
+                        lyrics: lyrics,
+                        artwork: artwork
+                    )
+                } else {
+                    lyricsError = "Lyrics not found"
+                    song = Song(
+                        title: playback.title,
+                        artist: playback.artist,
+                        lyrics: [],
+                        artwork: artwork
+                    )
                 }
+                isLoadingLyrics = false
             }
             await refreshCacheStats()
         }
