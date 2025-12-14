@@ -745,142 +745,269 @@ private struct VisibleLyricLine: Identifiable {
     var id: UUID { line.id }
 }
 
-// MARK: - Playback Detection Functions
+// MARK: - Playback Monitor (Precompiled AppleScripts)
 
-func runAppleScript(_ script: String) -> String? {
-    var error: NSDictionary?
-    guard let scriptObject = NSAppleScript(source: script) else { return nil }
-    let output = scriptObject.executeAndReturnError(&error)
-    return error == nil ? output.stringValue : nil
-}
-
-func getSpotifyPlayback() -> PlaybackInfo? {
-    let script = """
-    tell application "Spotify"
-        if it is running then
-            if player state is playing or player state is paused then
-                set trackName to name of current track
-                set artistName to artist of current track
-                set playerPos to player position as integer
-                set trackDur to (duration of current track) / 1000 as integer
-                set isPlaying to (player state is playing)
-                try
-                    set artworkURL to artwork url of current track
-                on error
-                    set artworkURL to ""
-                end try
-                return trackName & "||||" & artistName & "||||" & playerPos & "||||" & trackDur & "||||" & isPlaying & "||||" & artworkURL
+/// Singleton that precompiles AppleScripts once at init to avoid the overhead of
+/// creating and compiling new NSAppleScript objects on every polling cycle.
+/// 
+/// IMPORTANT: Artwork fetching is separated from playback polling to avoid
+/// writing to disk on every 200ms poll. Artwork scripts are only executed
+/// on track changes.
+final class PlaybackMonitor {
+    static let shared = PlaybackMonitor()
+    
+    /// Tracks which player was last active, to know which artwork script to call
+    enum ActivePlayer {
+        case spotify
+        case appleMusic
+        case none
+    }
+    
+    private(set) var lastActivePlayer: ActivePlayer = .none
+    
+    // MARK: - Precompiled Scripts
+    
+    // Playback state scripts (lightweight, no disk I/O)
+    private let spotifyPlaybackScript: NSAppleScript?
+    private let appleMusicPlaybackScript: NSAppleScript?
+    
+    // Artwork scripts (only called on track changes)
+    private let spotifyArtworkScript: NSAppleScript?
+    private let appleMusicArtworkScript: NSAppleScript?
+    
+    // Control scripts
+    private let spotifyPlayPauseScript: NSAppleScript?
+    private let spotifyNextScript: NSAppleScript?
+    private let spotifyPreviousScript: NSAppleScript?
+    private let appleMusicPlayPauseScript: NSAppleScript?
+    private let appleMusicNextScript: NSAppleScript?
+    private let appleMusicPreviousScript: NSAppleScript?
+    
+    private init() {
+        // Spotify playback query (includes artwork URL since it's just a string, no disk I/O)
+        let spotifySource = """
+        tell application "Spotify"
+            if it is running then
+                if player state is playing or player state is paused then
+                    set trackName to name of current track
+                    set artistName to artist of current track
+                    set playerPos to player position as integer
+                    set trackDur to (duration of current track) / 1000 as integer
+                    set isPlaying to (player state is playing)
+                    try
+                        set artworkURL to artwork url of current track
+                    on error
+                        set artworkURL to ""
+                    end try
+                    return trackName & "||||" & artistName & "||||" & playerPos & "||||" & trackDur & "||||" & isPlaying & "||||" & artworkURL
+                end if
             end if
-        end if
-    end tell
-    return ""
-    """
+        end tell
+        return ""
+        """
+        spotifyPlaybackScript = Self.compile(spotifySource)
+        
+        // Spotify doesn't need separate artwork script - URL is in playback response
+        spotifyArtworkScript = nil
+        
+        // Apple Music playback query - LIGHTWEIGHT, NO ARTWORK (no disk I/O)
+        let appleMusicSource = """
+        tell application "Music"
+            if it is running then
+                if player state is playing or player state is paused then
+                    set trackName to name of current track
+                    set artistName to artist of current track
+                    set playerPos to player position as integer
+                    set trackDur to duration of current track as integer
+                    set isPlaying to (player state is playing)
+                    return trackName & "||||" & artistName & "||||" & playerPos & "||||" & trackDur & "||||" & isPlaying
+                end if
+            end if
+        end tell
+        return ""
+        """
+        appleMusicPlaybackScript = Self.compile(appleMusicSource)
+        
+        // Apple Music artwork fetch - ONLY called on track changes
+        let appleMusicArtworkSource = """
+        tell application "Music"
+            if it is running then
+                if player state is playing or player state is paused then
+                    try
+                        if exists artwork 1 of current track then
+                            set artworkPath to (path to temporary items folder as string) & "lyrics_artwork_" & (random number from 1000 to 9999) & ".jpg"
+                            set artworkFile to open for access file artworkPath with write permission
+                            write (data of artwork 1 of current track) to artworkFile
+                            close access artworkFile
+                            return artworkPath
+                        end if
+                    on error
+                        return ""
+                    end try
+                end if
+            end if
+        end tell
+        return ""
+        """
+        appleMusicArtworkScript = Self.compile(appleMusicArtworkSource)
+        
+        // Spotify control scripts
+        spotifyPlayPauseScript = Self.compile("""
+        tell application "Spotify"
+            if it is running then playpause
+        end tell
+        """)
+        
+        spotifyNextScript = Self.compile("""
+        tell application "Spotify"
+            if it is running then next track
+        end tell
+        """)
+        
+        spotifyPreviousScript = Self.compile("""
+        tell application "Spotify"
+            if it is running then previous track
+        end tell
+        """)
+        
+        // Apple Music control scripts
+        appleMusicPlayPauseScript = Self.compile("""
+        tell application "Music"
+            if it is running then playpause
+        end tell
+        """)
+        
+        appleMusicNextScript = Self.compile("""
+        tell application "Music"
+            if it is running then next track
+        end tell
+        """)
+        
+        appleMusicPreviousScript = Self.compile("""
+        tell application "Music"
+            if it is running then previous track
+        end tell
+        """)
+        
+        Logger.playback.info("PlaybackMonitor initialized with precompiled AppleScripts (artwork fetch separated)")
+    }
     
-    guard let result = runAppleScript(script), !result.isEmpty else { return nil }
-    let parts = result.components(separatedBy: "||||")
-    guard parts.count >= 5 else { return nil }
+    /// Compiles an AppleScript source string, returning nil on failure
+    private static func compile(_ source: String) -> NSAppleScript? {
+        guard let script = NSAppleScript(source: source) else {
+            Logger.playback.error("Failed to create AppleScript from source")
+            return nil
+        }
+        var error: NSDictionary?
+        script.compileAndReturnError(&error)
+        if let error = error {
+            Logger.playback.error("Failed to compile AppleScript: \(error)")
+            return nil
+        }
+        return script
+    }
     
-    let artworkURL = parts.count >= 6 && !parts[5].isEmpty ? parts[5] : nil
+    /// Executes a precompiled script and returns the string result
+    @discardableResult
+    private func execute(_ script: NSAppleScript?) -> String? {
+        guard let script = script else { return nil }
+        var error: NSDictionary?
+        let result = script.executeAndReturnError(&error)
+        if error != nil { return nil }
+        return result.stringValue
+    }
     
-    return PlaybackInfo(
-        title: parts[0],
-        artist: parts[1],
-        position: Double(parts[2]) ?? 0,
-        duration: Double(parts[3]) ?? 0,
-        isPlaying: parts[4] == "true",
-        artworkURL: artworkURL,
-        artworkData: nil
-    )
+    // MARK: - Playback Detection (Lightweight, no disk I/O)
+    
+    func getSpotifyPlayback() -> PlaybackInfo? {
+        guard let result = execute(spotifyPlaybackScript), !result.isEmpty else { return nil }
+        lastActivePlayer = .spotify
+        return parsePlaybackResult(result, isSpotify: true)
+    }
+    
+    func getAppleMusicPlayback() -> PlaybackInfo? {
+        guard let result = execute(appleMusicPlaybackScript), !result.isEmpty else { return nil }
+        lastActivePlayer = .appleMusic
+        return parsePlaybackResult(result, isSpotify: false)
+    }
+    
+    func getCurrentPlayback() -> PlaybackInfo? {
+        // Try Spotify first, then Apple Music
+        if let spotify = getSpotifyPlayback() {
+            return spotify
+        }
+        if let appleMusic = getAppleMusicPlayback() {
+            return appleMusic
+        }
+        lastActivePlayer = .none
+        return nil
+    }
+    
+    private func parsePlaybackResult(_ result: String, isSpotify: Bool) -> PlaybackInfo? {
+        let parts = result.components(separatedBy: "||||")
+        guard parts.count >= 5 else { return nil }
+        
+        // Spotify includes artwork URL, Apple Music does not (fetched separately)
+        let artworkURL: String?
+        if isSpotify && parts.count >= 6 && !parts[5].isEmpty {
+            artworkURL = parts[5]
+        } else {
+            artworkURL = nil
+        }
+        
+        return PlaybackInfo(
+            title: parts[0],
+            artist: parts[1],
+            position: Double(parts[2]) ?? 0,
+            duration: Double(parts[3]) ?? 0,
+            isPlaying: parts[4] == "true",
+            artworkURL: artworkURL,
+            artworkData: nil  // Apple Music artwork fetched separately on track change
+        )
+    }
+    
+    // MARK: - Artwork Fetching (Only called on track changes!)
+    
+    /// Fetches Apple Music artwork. ONLY call this on track changes, not every poll!
+    func getAppleMusicArtwork() -> String? {
+        guard let result = execute(appleMusicArtworkScript), !result.isEmpty else { return nil }
+        return result
+    }
+    
+    // MARK: - Playback Controls
+    
+    func playPause() {
+        execute(spotifyPlayPauseScript)
+        execute(appleMusicPlayPauseScript)
+    }
+    
+    func nextTrack() {
+        execute(spotifyNextScript)
+        execute(appleMusicNextScript)
+    }
+    
+    func previousTrack() {
+        execute(spotifyPreviousScript)
+        execute(appleMusicPreviousScript)
+    }
 }
 
-func getAppleMusicPlayback() -> PlaybackInfo? {
-    let script = """
-    tell application "Music"
-        if it is running then
-            if player state is playing or player state is paused then
-                set trackName to name of current track
-                set artistName to artist of current track
-                set playerPos to player position as integer
-                set trackDur to duration of current track as integer
-                set isPlaying to (player state is playing)
-                set artworkData to ""
-                try
-                    if exists artwork 1 of current track then
-                        set artworkPath to (path to temporary items folder as string) & "lyrics_artwork_" & (random number from 1000 to 9999) & ".jpg"
-                        set artworkFile to open for access file artworkPath with write permission
-                        write (data of artwork 1 of current track) to artworkFile
-                        close access artworkFile
-                        set artworkData to artworkPath
-                    end if
-                on error
-                    set artworkData to ""
-                end try
-                return trackName & "||||" & artistName & "||||" & playerPos & "||||" & trackDur & "||||" & isPlaying & "||||" & artworkData
-            end if
-        end if
-    end tell
-    return ""
-    """
-    
-    guard let result = runAppleScript(script), !result.isEmpty else { return nil }
-    let parts = result.components(separatedBy: "||||")
-    guard parts.count >= 5 else { return nil }
-    
-    let artworkData = parts.count >= 6 && !parts[5].isEmpty ? parts[5] : nil
-    
-    return PlaybackInfo(
-        title: parts[0],
-        artist: parts[1],
-        position: Double(parts[2]) ?? 0,
-        duration: Double(parts[3]) ?? 0,
-        isPlaying: parts[4] == "true",
-        artworkURL: nil,
-        artworkData: artworkData
-    )
-}
+// MARK: - Global Convenience Functions (delegate to PlaybackMonitor)
 
 func getCurrentPlayback() -> PlaybackInfo? {
-    // Try Spotify first, then Apple Music
-    return getSpotifyPlayback() ?? getAppleMusicPlayback()
-}
-
-// MARK: - Playback Control Functions
-
-func controlSpotify(_ command: String) {
-    let script = """
-    tell application "Spotify"
-        if it is running then
-            \(command)
-        end if
-    end tell
-    """
-    _ = runAppleScript(script)
-}
-
-func controlAppleMusic(_ command: String) {
-    let script = """
-    tell application "Music"
-        if it is running then
-            \(command)
-        end if
-    end tell
-    """
-    _ = runAppleScript(script)
+    PlaybackMonitor.shared.getCurrentPlayback()
 }
 
 func playPause() {
-    controlSpotify("playpause")
-    controlAppleMusic("playpause")
+    PlaybackMonitor.shared.playPause()
 }
 
 func nextTrack() {
-    controlSpotify("next track")
-    controlAppleMusic("next track")
+    PlaybackMonitor.shared.nextTrack()
 }
 
 func previousTrack() {
-    controlSpotify("previous track")
-    controlAppleMusic("previous track")
+    PlaybackMonitor.shared.previousTrack()
 }
 
 // MARK: - Sample Data (Fallback)
@@ -1065,7 +1192,6 @@ enum WindowPresentationEffect: String, CaseIterable, Identifiable {
 struct ResponsiveMetrics {
     let size: CGSize
     let fontScale: Double
-    let isMinimized: Bool
     
     var width: CGFloat { size.width }
     var height: CGFloat { size.height }
@@ -1125,7 +1251,6 @@ struct ResponsiveMetrics {
     }
     
     var headerHeight: CGFloat {
-        if isMinimized { return 48 }
         // Actual header height for overlay positioning
         return interpolate(compact: 56, medium: 60, wide: 64)
     }
@@ -1156,7 +1281,6 @@ struct ResponsiveMetrics {
     }
     
     var contentHorizontalPadding: CGFloat {
-        if isMinimized { return 18 }
         // Percentage-based with breakpoint adjustments
         let basePadding = width * 0.04
         if isVeryCompactWidth {
@@ -1192,8 +1316,7 @@ struct ResponsiveMetrics {
     
     var lyricCurrentSize: CGFloat {
         let base: CGFloat
-        if isMinimized { base = 26 }
-        else if isVeryCompactWidth { base = 26 }
+        if isVeryCompactWidth { base = 26 }
         else if isCompactWidth { base = 28 }
         else if isWideWidth { base = 36 }
         else { base = 32 }
@@ -1202,16 +1325,14 @@ struct ResponsiveMetrics {
     
     var lyricSecondarySize: CGFloat {
         let base: CGFloat
-        if isMinimized { base = 16 }
-        else if isVeryCompactWidth { base = 16 }
+        if isVeryCompactWidth { base = 16 }
         else if isCompactWidth { base = 18 }
         else { base = 20 }
         return base * effectiveFontScale
     }
     
     var lyricVerticalPadding: CGFloat {
-        if isMinimized { return 10 }
-        return interpolate(compact: 12, medium: 14, wide: 16)
+        interpolate(compact: 12, medium: 14, wide: 16)
     }
     
     var lyricHorizontalPadding: CGFloat {
@@ -1240,11 +1361,11 @@ struct ResponsiveMetrics {
     }
     
     var lyricCurrentScale: CGFloat {
-        isMinimized ? 1.03 : 1.05
+        1.05
     }
     
     var lyricSecondaryScale: CGFloat {
-        isMinimized ? 0.96 : 0.92
+        0.92
     }
     
     var lyricBlurRadius: CGFloat {
@@ -1301,12 +1422,32 @@ struct ResponsiveMetrics {
 class AppSettings: ObservableObject {
     private let cachingEnabledKey = "LyricsCacheEnabled"
     private let presentationEffectKey = WindowPresentationEffect.storageKey
+    private let windowOpacityKey = "LyricsWindowOpacity"
+    private let cornerRadiusKey = "LyricsCornerRadius"
+    private let manualThemeKey = "LyricsManualTheme"
+    private let fontScaleKey = "LyricsFontScale"
     
-    @Published var windowOpacity: Double = 1.0
-    @Published var cornerRadius: Double = 16.0
+    @Published var windowOpacity: Double {
+        didSet {
+            UserDefaults.standard.set(windowOpacity, forKey: windowOpacityKey)
+        }
+    }
+    @Published var cornerRadius: Double {
+        didSet {
+            UserDefaults.standard.set(cornerRadius, forKey: cornerRadiusKey)
+        }
+    }
     @Published var themeMode: ThemeMode = .matchSystem
-    @Published var manualTheme: ThemePreset = .midnight
-    @Published var fontScale: Double = 0.8
+    @Published var manualTheme: ThemePreset {
+        didSet {
+            UserDefaults.standard.set(manualTheme.rawValue, forKey: manualThemeKey)
+        }
+    }
+    @Published var fontScale: Double {
+        didSet {
+            UserDefaults.standard.set(fontScale, forKey: fontScaleKey)
+        }
+    }
     @Published var presentationEffect: WindowPresentationEffect {
         didSet {
             WindowPresentationEffect.persist(presentationEffect)
@@ -1323,13 +1464,28 @@ class AppSettings: ObservableObject {
     @Published var cacheStats: CacheStats = .empty
     
     init() {
-        let stored = UserDefaults.standard.object(forKey: cachingEnabledKey) as? Bool ?? true
-        _cachingEnabled = Published(initialValue: stored)
+        // Load persisted values with defaults
+        let storedOpacity = UserDefaults.standard.object(forKey: windowOpacityKey) as? Double ?? 1.0
+        _windowOpacity = Published(initialValue: storedOpacity)
+        
+        let storedCornerRadius = UserDefaults.standard.object(forKey: cornerRadiusKey) as? Double ?? 16.0
+        _cornerRadius = Published(initialValue: storedCornerRadius)
+        
+        let storedThemeRaw = UserDefaults.standard.string(forKey: manualThemeKey) ?? ThemePreset.midnight.rawValue
+        let storedTheme = ThemePreset(rawValue: storedThemeRaw) ?? .midnight
+        _manualTheme = Published(initialValue: storedTheme)
+        
+        let storedFontScale = UserDefaults.standard.object(forKey: fontScaleKey) as? Double ?? 0.8
+        _fontScale = Published(initialValue: storedFontScale)
+        
+        let storedCaching = UserDefaults.standard.object(forKey: cachingEnabledKey) as? Bool ?? true
+        _cachingEnabled = Published(initialValue: storedCaching)
+        
         let storedEffect = WindowPresentationEffect.persistedValue()
         _presentationEffect = Published(initialValue: storedEffect)
         
         Task {
-            await LyricsCache.shared.setEnabled(stored)
+            await LyricsCache.shared.setEnabled(storedCaching)
         }
     }
     
@@ -1356,25 +1512,24 @@ struct LyricsWidgetView: View {
     @State private var currentTime: Double = 0
     @State private var songDuration: Double = 0
     @State private var currentLineIndex = 0
-    @State private var isMinimized = false
     @State private var timer: Timer?
     @State private var song: Song
-    @State private var lastTrackTitle: String = ""
+    @State private var lastTrackID: String = ""  // "title|artist" for robust track detection
     @State private var noPlaybackDetected = false
+    @State private var playbackTaskID: UUID = UUID()  // Used to discard stale playback updates
     @State private var isLoadingLyrics = false
     @State private var lyricsError: String? = nil
-    @State private var pendingSongTitle: String? = nil
-    @State private var pendingSongArtist: String? = nil
     @State private var isHovering = false
     @State private var isPointerInside = false
     @State private var showSettings = false
     @State private var showArtworkBackdrop = false
     @State private var dominantColor: Color? = nil
+    @State private var blurredBackdropImage: NSImage? = nil
     @State private var isPinned = false
     @State private var isResizing = false
     @State private var previousSize: CGSize = .zero
     @StateObject private var settings = AppSettings()
-    @StateObject private var swipeHandler = BrowserSwipeHandler()
+    @StateObject private var swipeHandler = BrowserSwipeHandler.shared
     @Environment(\.colorScheme) private var colorScheme
     
     init(song: Song) {
@@ -1433,8 +1588,7 @@ struct LyricsWidgetView: View {
         GeometryReader { proxy in
             let metrics = ResponsiveMetrics(
                 size: proxy.size,
-                fontScale: settings.fontScale,
-                isMinimized: isMinimized
+                fontScale: settings.fontScale
             )
             
             // Detect resize
@@ -1494,10 +1648,8 @@ struct LyricsWidgetView: View {
                     // When pinned, always show
                     isHovering = true
                 } else if !isResizing {
-                    // Update hover state with animation
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
-                        isHovering = hovering || showSettings
-                    }
+                    // View has .animation(value: isHovering) - no withAnimation needed
+                    isHovering = hovering || showSettings
                 }
             }
             .onChange(of: currentSize) { oldSize, newSize in
@@ -1513,6 +1665,8 @@ struct LyricsWidgetView: View {
             .onChange(of: song.artwork, initial: false) { _, newArtwork in
                 if let artwork = newArtwork {
                     extractDominantColor(from: artwork)
+                    // Pre-compute blurred backdrop image
+                    blurredBackdropImage = precomputeBlurredBackdrop(from: artwork)
                     // Show backdrop by default when artwork is available
                     if !showArtworkBackdrop {
                         let animation = isResizing ? nil : Animation.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)
@@ -1525,9 +1679,8 @@ struct LyricsWidgetView: View {
             .animation(isResizing ? nil : .spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15), value: song.artwork)
         .onChange(of: showSettings, initial: false) { _, newValue in
             if !isPinned && !isResizing {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.88, blendDuration: 0.1)) {
-                    isHovering = newValue || isPointerInside
-                }
+                // View has .animation(value: isHovering) - no withAnimation needed
+                isHovering = newValue || isPointerInside
             }
         }
         .onAppear {
@@ -1543,11 +1696,11 @@ struct LyricsWidgetView: View {
                 onPrevious: { previousTrack() },
                 onNext: { nextTrack() }
             )
-            swipeHandler.start()
+            // Note: swipeHandler.start() is called by AppDelegate when window is shown
         }
         .onDisappear {
             stopTimer()
-            swipeHandler.stop()
+            // Note: swipeHandler.stop() is called by AppDelegate when window is hidden
         }
     }
     }
@@ -2005,13 +2158,7 @@ struct LyricsWidgetView: View {
         return 0.4 + (sin(time * 1.6) + 1.0) * 0.25
     }
     
-    private func sanitizedDisplayString(_ value: String?) -> String? {
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
-            return nil
-        }
-        return value
-    }
-    
+
     private func placeholderView(systemImage: String, message: String, metrics: ResponsiveMetrics) -> some View {
         VStack(spacing: 12) {
             Image(systemName: systemImage)
@@ -2314,14 +2461,16 @@ struct LyricsWidgetView: View {
     }
     
     
-    private func startTimer() {
+    // MARK: - Timer Management
+    
+    /// Adaptive polling: 500ms during playback, 2s when idle to save CPU
+    private func startTimer(interval: TimeInterval = 0.5) {
         timer?.invalidate()
         
-        // Real playback monitoring - check every 200ms for smoother updates
-        timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             updateFromRealPlayback()
         }
-        // Add timer to common run loop modes to prevent stuttering during scrolling/interaction
+        
         if let timer = timer {
             RunLoop.current.add(timer, forMode: .common)
         }
@@ -2339,17 +2488,32 @@ struct LyricsWidgetView: View {
         }
     }
     
+    /// Finds the current lyric line using binary search.
+    /// O(log n) instead of O(n²) - critical since this runs at 60fps.
     private func updateCurrentLine() {
-        if let newIndex = song.lyrics.firstIndex(where: { line in
-            let nextIndex = song.lyrics.firstIndex(where: { $0.time > line.time })
-            let nextTime = nextIndex.map { song.lyrics[$0].time } ?? Double.infinity
-            return currentTime >= line.time && currentTime < nextTime
-        }) {
-            if newIndex != currentLineIndex {
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.85, blendDuration: 0.1)) {
-                    currentLineIndex = newIndex
-                }
+        guard !song.lyrics.isEmpty else { return }
+        
+        // Binary search: find the first line with time > currentTime
+        // The current line is the one before that
+        var low = 0
+        var high = song.lyrics.count
+        
+        while low < high {
+            let mid = (low + high) / 2
+            if song.lyrics[mid].time <= currentTime {
+                low = mid + 1
+            } else {
+                high = mid
             }
+        }
+        
+        // low is now the index of the first line with time > currentTime
+        // So current line is low - 1, but ensure it's at least 0
+        let newIndex = max(0, low - 1)
+        
+        if newIndex != currentLineIndex {
+            // View has .animation(value: currentLineIndex) - no withAnimation needed
+            currentLineIndex = newIndex
         }
     }
     
@@ -2365,19 +2529,31 @@ struct LyricsWidgetView: View {
     private func artworkBackdropView(artwork: NSImage, metrics: ResponsiveMetrics) -> some View {
         GeometryReader { geometry in
             ZStack {
-                // Blurred artwork background - optimized blur and edge handling
-                Image(nsImage: artwork)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    // Extend beyond bounds to prevent edge artifacts
-                    .frame(
-                        width: geometry.size.width + 100,
-                        height: geometry.size.height + 100
-                    )
-                    .blur(radius: 28) // Reduced from 40 for better performance
-                    .scaleEffect(1.15) // Increased slightly for better edge coverage
-                    .offset(x: 0, y: 0) // Center the extended image
-                    .clipped()
+                // Pre-computed blurred artwork background
+                if let blurredImage = blurredBackdropImage {
+                    Image(nsImage: blurredImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        // Extend beyond bounds to prevent edge artifacts
+                        .frame(
+                            width: geometry.size.width + 100,
+                            height: geometry.size.height + 100
+                        )
+                        .scaleEffect(1.15) // For better edge coverage
+                        .offset(x: 0, y: 0) // Center the extended image
+                        .clipped()
+                } else {
+                    // Fallback: display original artwork while blur is computing
+                    Image(nsImage: artwork)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(
+                            width: geometry.size.width + 100,
+                            height: geometry.size.height + 100
+                        )
+                        .scaleEffect(1.15)
+                        .clipped()
+                }
                 
                 // Color overlay
                 if let dominantColor = dominantColor {
@@ -2405,7 +2581,40 @@ struct LyricsWidgetView: View {
         }
         .onAppear {
             extractDominantColor(from: artwork)
+            // Compute blurred backdrop if not already done
+            if blurredBackdropImage == nil {
+                blurredBackdropImage = precomputeBlurredBackdrop(from: artwork)
+            }
         }
+    }
+    
+    private func precomputeBlurredBackdrop(from image: NSImage) -> NSImage {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return image
+        }
+        
+        let ciImage = CIImage(cgImage: cgImage)
+        
+        guard let blurFilter = CIFilter(name: "CIGaussianBlur") else {
+            return image
+        }
+        
+        blurFilter.setValue(ciImage, forKey: kCIInputImageKey)
+        blurFilter.setValue(28.0, forKey: kCIInputRadiusKey)
+        
+        guard let outputImage = blurFilter.outputImage else {
+            return image
+        }
+        
+        // CIGaussianBlur extends the image bounds, so we need to crop back to original size
+        let croppedImage = outputImage.cropped(to: ciImage.extent)
+        
+        let context = CIContext(options: [.useSoftwareRenderer: false])
+        guard let outputCGImage = context.createCGImage(croppedImage, from: croppedImage.extent) else {
+            return image
+        }
+        
+        return NSImage(cgImage: outputCGImage, size: image.size)
     }
     
     private func extractDominantColor(from image: NSImage) {
@@ -2512,20 +2721,22 @@ struct LyricsWidgetView: View {
             return cached
         }
         
-        // Try Apple Music artwork data
-        if let artworkData = playback.artworkData, !artworkData.isEmpty {
-            if let image = convertAppleMusicArtwork(artworkData) {
-                ArtworkCache.shared.set(image, title: playback.title, artist: playback.artist)
-                return image
-            }
-        }
-        
-        // Try Spotify artwork URL
+        // Try Spotify artwork URL (already in playback info, no extra fetch needed)
         if let artworkURL = playback.artworkURL, !artworkURL.isEmpty,
            let url = URL(string: artworkURL) {
             if let image = await downloadArtwork(from: url) {
                 ArtworkCache.shared.set(image, title: playback.title, artist: playback.artist)
                 return image
+            }
+        }
+        
+        // For Apple Music, fetch artwork on-demand (only called on track changes!)
+        if PlaybackMonitor.shared.lastActivePlayer == .appleMusic {
+            if let artworkPath = PlaybackMonitor.shared.getAppleMusicArtwork() {
+                if let image = convertAppleMusicArtwork(artworkPath) {
+                    ArtworkCache.shared.set(image, title: playback.title, artist: playback.artist)
+                    return image
+                }
             }
         }
         
@@ -2568,85 +2779,106 @@ struct LyricsWidgetView: View {
     // MARK: - Real Playback Integration
     
     private func updateFromRealPlayback() {
-        guard let playback = getCurrentPlayback() else {
-            // No playback detected
-            noPlaybackDetected = true
-            isPlaying = false
-            return
-        }
+        // Generate a unique ID for this polling iteration to handle overlapping tasks
+        let taskID = UUID()
+        playbackTaskID = taskID
         
-        noPlaybackDetected = false
-        
-        // Update play state, position, and duration
-        isPlaying = playback.isPlaying
-        currentTime = playback.position
-        songDuration = playback.duration
-        
-        // Track change detection
-        if playback.title != lastTrackTitle && !playback.title.isEmpty {
-            lastTrackTitle = playback.title
+        // Run AppleScript execution on a background thread to avoid blocking main thread
+        Task.detached(priority: .userInitiated) {
+            let playback = getCurrentPlayback()
             
-            Logger.playback.info("Track changed to: \(playback.title) by \(playback.artist)")
-            
-            // Reset current line index when track changes
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)) {
-                currentLineIndex = 0
-            }
-            
-            // Update song info and fetch lyrics
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)) {
-                isLoadingLyrics = true
-                lyricsError = nil
-                pendingSongTitle = playback.title
-                pendingSongArtist = playback.artist
-            }
-            
-            // Load artwork asynchronously
-            Task {
-                let artwork = await loadArtwork(from: playback)
+            // Update UI state on MainActor
+            await MainActor.run {
+                // Discard stale results if a newer task has started
+                guard taskID == playbackTaskID else { return }
                 
-                // Fetch lyrics asynchronously
-                let fetchedLyrics = await LyricsService.fetchLyrics(
-                    title: playback.title,
-                    artist: playback.artist,
-                    duration: playback.duration
-                )
-                
-                await MainActor.run {
-                    // Smooth transition when song changes
-                    withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.15)) {
-                        if let lyrics = fetchedLyrics {
-                            if lyrics.isEmpty {
-                                lyricsError = "Instrumental track"
-                            } else {
-                                lyricsError = nil
-                            }
-                            song = Song(
-                                title: playback.title,
-                                artist: playback.artist,
-                                lyrics: lyrics,
-                                artwork: artwork
-                            )
-                        } else {
-                            lyricsError = "Lyrics not found"
-                            song = Song(
-                                title: playback.title,
-                                artist: playback.artist,
-                                lyrics: [],
-                                artwork: artwork
-                            )
-                        }
-                        isLoadingLyrics = false
-                        pendingSongTitle = nil
-                        pendingSongArtist = nil
+                guard let playback = playback else {
+                    if !noPlaybackDetected {
+                        noPlaybackDetected = true
+                        isPlaying = false
+                        // Switch to slow polling when idle (2s)
+                        startTimer(interval: 2.0)
                     }
+                    return
                 }
-                await refreshCacheStats()
+                
+                if noPlaybackDetected {
+                    noPlaybackDetected = false
+                    // Switch back to fast polling when playback detected (500ms)
+                    startTimer(interval: 0.5)
+                }
+                
+                // Update play state only if changed
+                if isPlaying != playback.isPlaying {
+                    isPlaying = playback.isPlaying
+                }
+                
+                // Update duration only if changed significantly
+                if abs(songDuration - playback.duration) > 1.0 {
+                    songDuration = playback.duration
+                }
+                
+                // Update time only if changed by at least 0.5 seconds
+                // This prevents flickering from tiny changes
+                if abs(currentTime - playback.position) > 0.5 {
+                    currentTime = playback.position
+                    
+                    // Only check line changes when time actually updated
+                    updateCurrentLine()
+                }
+                
+                // Track change detection using "title|artist" for robustness
+                let trackID = "\(playback.title)|\(playback.artist)"
+                if trackID != lastTrackID && !playback.title.isEmpty {
+                    handleTrackChange(playback: playback, trackID: trackID)
+                }
             }
         }
+    }
+    
+    // Separate function to keep updateFromRealPlayback clean
+    private func handleTrackChange(playback: PlaybackInfo, trackID: String) {
+        lastTrackID = trackID
+        Logger.playback.info("Track changed to: \(playback.title) by \(playback.artist)")
         
-        // Update current line based on real position
-        updateCurrentLine()
+        // Views have .animation() modifiers for these state changes:
+        // - currentLineIndex: .animation(value: currentLineIndex)
+        // - song.title: .animation(value: song.title)
+        // - lyricsStatusKey: .animation(value: lyricsStatusKey) (depends on isLoadingLyrics, lyricsError)
+        currentLineIndex = 0
+        isLoadingLyrics = true
+        lyricsError = nil
+        
+        Task {
+            let artwork = await loadArtwork(from: playback)
+            let fetchedLyrics = await LyricsService.fetchLyrics(
+                title: playback.title,
+                artist: playback.artist,
+                duration: playback.duration
+            )
+            
+            await MainActor.run {
+                if let lyrics = fetchedLyrics {
+                    lyricsError = lyrics.isEmpty ? "Instrumental track" : nil
+                    song = Song(
+                        title: playback.title,
+                        artist: playback.artist,
+                        lyrics: lyrics,
+                        artwork: artwork
+                    )
+                } else {
+                    lyricsError = "Lyrics not found"
+                    song = Song(
+                        title: playback.title,
+                        artist: playback.artist,
+                        lyrics: [],
+                        artwork: artwork
+                    )
+                }
+                isLoadingLyrics = false
+            }
+            await refreshCacheStats()
+        }
     }
 }
 
@@ -2831,6 +3063,8 @@ struct ScaleButtonStyle: ButtonStyle {
 // MARK: - Browser-Style Swipe Handler
 
 final class BrowserSwipeHandler: ObservableObject {
+    static let shared = BrowserSwipeHandler()
+    
     private enum Constants {
         static let triggerThreshold: CGFloat = 85
     }
@@ -3121,6 +3355,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let effect = WindowPresentationEffect.persistedValue()
         
         if window.isVisible {
+            BrowserSwipeHandler.shared.stop()
             WindowPresentationAnimator.dismiss(window: window, effect: effect) {
                 window.orderOut(nil)
             }
@@ -3148,6 +3383,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.orderFrontRegardless()
         let effect = WindowPresentationEffect.persistedValue()
         WindowPresentationAnimator.animate(window: window, effect: effect)
+        BrowserSwipeHandler.shared.start()
     }
     
     // MARK: - Hot Keys
